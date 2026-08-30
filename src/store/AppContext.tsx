@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react'
-import type { Action, AppState, Canvas, ReferenceAnchor, SavedBook } from '../types'
+import type { Action, AppState, Canvas, ChapterWriting, ReferenceAnchor, SavedBook } from '../types'
 import { seedCanvases } from '../data/seed'
 
 const STORAGE_KEY = 'writer-simulator-state-v1'
@@ -113,6 +113,16 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, library: state.library.filter(b => b.id !== action.bookId) }
     case 'CLEAR_LIBRARY':
       return { ...state, library: [] }
+    case 'UPDATE_CHAPTER': {
+      return {
+        ...state,
+        library: state.library.map(b =>
+          b.id === action.bookId
+            ? { ...b, chapterWritings: { ...(b.chapterWritings ?? {}), [action.chapterIndex]: action.writing } }
+            : b,
+        ),
+      }
+    }
     case 'HYDRATE':
       return action.state
     case 'AI_APPEND_ANCHORS': {
@@ -145,6 +155,7 @@ interface ContextValue {
   saveBook: (book: SavedBook) => void
   removeBook: (bookId: string) => void
   clearLibrary: () => void
+  updateChapter: (bookId: string, chapterIndex: number, writing: ChapterWriting) => void
 }
 
 const AppContext = createContext<ContextValue | null>(null)
@@ -205,6 +216,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveBook: book => dispatch({ type: 'SAVE_BOOK', book }),
     removeBook: bookId => dispatch({ type: 'REMOVE_BOOK', bookId }),
     clearLibrary: () => dispatch({ type: 'CLEAR_LIBRARY' }),
+    updateChapter: (bookId, chapterIndex, writing) =>
+      dispatch({ type: 'UPDATE_CHAPTER', bookId, chapterIndex, writing }),
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

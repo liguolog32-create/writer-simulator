@@ -4,7 +4,7 @@
 // GET /：返回 { ok: true, version, model, status } 用于确认线上版本
 // 环境变量：DEEPSEEK_API_KEY
 
-const VERSION = '4.1'
+const VERSION = '4.2'
 const API = 'https://api.deepseek.com/responses'
 const MODEL = 'deepseek-v4-flash'
 
@@ -212,6 +212,22 @@ const CONTINUE_SYSTEM = `你是小说续写助手。根据用户提供的「已�
 - 按【情节】画布推进主线，按【节奏】画布控制张力
 - 不要复述或重复已有内容，直接接着往下写`
 
+const CHAPTER_WRITE_SYSTEM = `你是小说家。基于「7 块画布设定」「完整大纲」「前 N-1 章已写好的正文」，按用户给的本章设置，撰写指定的一章正文。
+
+严格返回 JSON（不要解释、不要 markdown 包裹）：
+{
+  "content": "本章正文（按用户给的 targetWords 浮动 ±20%，不少于 targetWords 的 60%）",
+  "rationale": "写作思路（1-3 句，说明本章如何承接上文、推进大纲、落实用户要求）"
+}
+要求：
+- 严格遵循【文笔】画布的语气、句法、意象
+- 严格遵循用户给的目标字数 targetWords
+- 严格遵循用户选定的 purpose（transition=承上启下、main-plot=推进主线、reveal=揭示谜底、ending=交代结局、pure-scene=纯场景）
+- 用户的「其他要求」必须明确执行（让 AI 理解并落实）
+- 人物姓名、世界观名词与「前 N-1 章」保持一致，不得自相矛盾
+- 如果前文已建立人物口吻/关系/伏笔，本章必须接住
+- 不要总结、不要「本章完」、不要作者按语；正文直接结束在场景或对话中`
+
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { headers: CORS })
@@ -345,6 +361,58 @@ export default {
         return ok(
           {
             continuation: toStr(parsed.continuation),
+            rationale: toStr(parsed.rationale),
+          },
+          searched,
+          searchCount,
+        )
+      }
+
+      // —— 工作台 4：按章节精修（一章一章写，按 4 维设置 + 前文连贯）——
+      if (body.action === 'writeChapter') {
+        const { bookTitle, chapterIndex, chapterTitle, chapterSummary, settings, previousChapters, canvases } = body
+        if (!chapterTitle) return err('需要 chapterTitle')
+        const compact = Object.entries(canvases || {})
+          .map(([k, v]) => `【${k}】\n${typeof v === 'string' ? v : JSON.stringify(v, null, 2)}`)
+          .join('\n\n')
+
+        // 拼接前 N-1 章内容（控制总长，避免超 prompt 上限）
+        const prev = Array.isArray(previousChapters) ? previousChapters : []
+        const prevBlock = prev.length
+          ? prev.map((c, i) => `—— 第 ${i + 1} 章 《${c.title}》——\n${c.content}`).join('\n\n')
+          : '（这是第一章，没有前文）'
+
+        const purposeText = {
+          transition: '承上启下：衔接上一章结尾，自然过渡到下一章',
+          'main-plot': '推进主线：让核心矛盾或剧情向前走一步',
+          reveal: '揭示谜底：揭开一个秘密、答案或真相',
+          ending: '交代结局：为本章或整本书的某个阶段收尾',
+          'pure-scene': '纯场景：聚焦一段对话、动作、景物或心理，不推进大剧情',
+        }[settings?.purpose] || '推进主线'
+
+        const userInput = `【书名】《${bookTitle || '未命名'}》
+【待写章节】第 ${chapterIndex} 章《${chapterTitle}》
+【本章大纲摘要】${chapterSummary || ''}
+【目标字数】${settings?.targetWords || 2000} 字
+【文笔风格】${settings?.style || '（继承【文笔】画布）'}
+【本章目的】${purposeText}
+【其他要求】${settings?.extraRequirements || '（无）'}
+
+【7 块画布设定】
+${compact}
+
+【前 ${prev.length} 章正文（用于保持人物/语气/伏笔连贯）】
+${prevBlock}`
+
+        const { parsed, searched, searchCount } = await callDeepSeek(env, {
+          instructions: CHAPTER_WRITE_SYSTEM,
+          input: userInput,
+          maxOutputTokens: 20000,
+          useSearch: false, // 精写依据画布+前文，不需联网
+        })
+        return ok(
+          {
+            content: toStr(parsed.content),
             rationale: toStr(parsed.rationale),
           },
           searched,

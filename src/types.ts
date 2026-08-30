@@ -18,6 +18,38 @@ export interface Canvas {
 
 export type Mode = 'read' | 'admin'
 
+/** 章节精修的写作目的 */
+export type ChapterPurpose = 'transition' | 'main-plot' | 'reveal' | 'ending' | 'pure-scene'
+
+/** 单章精修结果 */
+export interface ChapterWriting {
+  content: string
+  settings: {
+    targetWords: number
+    style: string
+    purpose: ChapterPurpose
+    extraRequirements: string
+  }
+  generatedAt: string
+  wordCount: number
+}
+
+const PURPOSE_LABELS: Record<ChapterPurpose, string> = {
+  transition: '承上启下',
+  'main-plot': '推进主线',
+  reveal: '揭示谜底',
+  ending: '交代结局',
+  'pure-scene': '纯场景',
+}
+export const PURPOSE_OPTIONS: { value: ChapterPurpose; label: string }[] = [
+  { value: 'transition', label: PURPOSE_LABELS.transition },
+  { value: 'main-plot', label: PURPOSE_LABELS['main-plot'] },
+  { value: 'reveal', label: PURPOSE_LABELS.reveal },
+  { value: 'ending', label: PURPOSE_LABELS.ending },
+  { value: 'pure-scene', label: PURPOSE_LABELS['pure-scene'] },
+]
+export const purposeLabel = (p: ChapterPurpose) => PURPOSE_LABELS[p] ?? p
+
 /** 一次「生成文本」的完整存档 */
 export interface SavedBook {
   id: string
@@ -44,6 +76,8 @@ export interface SavedBook {
   usedFallback: boolean
   engine: 'deepseek' | 'local'
   createdAt: string
+  /** 章节精修：每章单独精写过的正文。key 是 chapter.index */
+  chapterWritings?: Record<number, ChapterWriting>
 }
 
 export interface AppState {
@@ -69,3 +103,4 @@ export type Action =
   | { type: 'SAVE_BOOK'; book: SavedBook }
   | { type: 'REMOVE_BOOK'; bookId: string }
   | { type: 'CLEAR_LIBRARY' }
+  | { type: 'UPDATE_CHAPTER'; bookId: string; chapterIndex: number; writing: ChapterWriting }

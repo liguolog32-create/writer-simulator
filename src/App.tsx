@@ -7,8 +7,9 @@ import { BookLibrary } from './components/BookLibrary'
 import { BookGenerator } from './components/BookGenerator'
 import { BookShelf } from './components/BookShelf'
 import { Workbench } from './components/Workbench'
+import { ChapterWriter } from './components/ChapterWriter'
 
-type View = 'canvas' | 'workbench'
+type View = 'canvas' | 'workbench' | 'chapter'
 
 function AppShell() {
   const { state } = useApp()
@@ -44,6 +45,12 @@ function AppShell() {
         >
           工作台 · 拆解 / 修改 / 续写
         </button>
+        <button
+          className={`viewtab ${view === 'chapter' ? 'active' : ''}`}
+          onClick={() => setView('chapter')}
+        >
+          章节精修 · 逐章 AI 创作
+        </button>
       </nav>
 
       <main className="main">
@@ -53,6 +60,8 @@ function AppShell() {
         <section className="workarea">
           {view === 'workbench' ? (
             <Workbench />
+          ) : view === 'chapter' ? (
+            <ChapterWriter />
           ) : state.selectedCanvasId ? (
             <CanvasBlock />
           ) : (
