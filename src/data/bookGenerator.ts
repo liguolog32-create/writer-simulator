@@ -78,7 +78,7 @@ const WORLD_KEYWORDS = [
   '山海', '异兽', '时空', '机甲', '星际', '病毒', '异能', '系统', '副本', '公会',
 ]
 
-function extractWorldNouns(text: string): string[] {
+export function extractWorldNouns(text: string): string[] {
   const hits = WORLD_KEYWORDS.filter(k => text.includes(k))
   if (hits.length >= 2) return hits.slice(0, 6)
   // 兜底：切分短语取前几个
@@ -89,7 +89,7 @@ function extractWorldNouns(text: string): string[] {
   return [...new Set([...hits, ...parts])].slice(0, 6)
 }
 
-function extractProtagonist(text: string): string {
+export function extractProtagonist(text: string): string {
   const patterns = [
     /([\u4e00-\u9fa5]{2,4})[，,]\s*\d+\s*岁/,
     /主角[：:\s]*([\u4e00-\u9fa5]{2,4})/,
@@ -103,13 +103,13 @@ function extractProtagonist(text: string): string {
   return '主角'
 }
 
-interface Relation {
+export interface Relation {
   role: string
   name: string
   status: string
 }
 
-function extractRelations(text: string): Relation[] {
+export function extractRelations(text: string): Relation[] {
   const out: Relation[] = []
   // 括号状态改为可选，否则「- 对手 萧皇后」这类无括号的关系会被漏掉
   const re = /[-•*]?\s*([\u4e00-\u9fa5]{1,3})[\s:：]+([\u4e00-\u9fa5]{2,4})(?:[（(]([^）)]+)[）)])?/g
@@ -120,7 +120,7 @@ function extractRelations(text: string): Relation[] {
   return out
 }
 
-interface StyleProfile {
+export interface StyleProfile {
   shortSentences: boolean
   restrained: boolean
   objectMetaphor: boolean
@@ -130,7 +130,7 @@ interface StyleProfile {
   label: string
 }
 
-function extractStyle(text: string): StyleProfile {
+export function extractStyle(text: string): StyleProfile {
   const has = (...ks: string[]) => ks.some(k => text.includes(k))
   const p: StyleProfile = {
     shortSentences: has('短句', '句短', '简洁', '利落'),
@@ -187,7 +187,7 @@ function extractRhythm(text: string): { climaxEvery: number; reversalPerVolume: 
   return { climaxEvery: Math.max(2, climaxEvery), reversalPerVolume }
 }
 
-function extractPlotBeats(text: string): string[] {
+export function extractPlotBeats(text: string): string[] {
   const parts = text
     .split(/[，。；\n]/)
     .map(t => t.trim())

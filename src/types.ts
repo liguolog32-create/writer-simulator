@@ -18,10 +18,40 @@ export interface Canvas {
 
 export type Mode = 'read' | 'admin'
 
+/** 一次「生成文本」的完整存档 */
+export interface SavedBook {
+  id: string
+  title: string
+  synopsis: string
+  outline: Array<{
+    index: number
+    title: string
+    summary: string
+    tag: '开局' | '推进' | '高潮' | '反转' | '收束'
+    words: number
+  }>
+  sampleChapter: { title: string; content: string; beat: string }
+  stats: {
+    totalWords: number
+    chapters: number
+    volumes: number
+    styleLabel: string
+    anchorSources: string[]
+  }
+  /** 生成溯源：是否真联网、搜索次数、是否本地兜底、用的哪个引擎 */
+  searched: boolean
+  searchCount: number
+  usedFallback: boolean
+  engine: 'deepseek' | 'local'
+  createdAt: string
+}
+
 export interface AppState {
   canvases: Record<string, Canvas>
   selectedCanvasId: string | null
   mode: Mode
+  /** 作品库：历次生成的存档，最新的在前 */
+  library: SavedBook[]
 }
 
 export type Action =
@@ -36,3 +66,6 @@ export type Action =
   | { type: 'RESET_TO_SEED' }
   | { type: 'HYDRATE'; state: AppState }
   | { type: 'AI_APPEND_ANCHORS'; canvasId: string; anchors: ReferenceAnchor[] }
+  | { type: 'SAVE_BOOK'; book: SavedBook }
+  | { type: 'REMOVE_BOOK'; bookId: string }
+  | { type: 'CLEAR_LIBRARY' }
