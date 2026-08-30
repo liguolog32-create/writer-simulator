@@ -4,7 +4,7 @@
 // GET /：返回 { ok: true, version, model, status } 用于确认线上版本
 // 环境变量：DEEPSEEK_API_KEY
 
-const VERSION = '4.0'
+const VERSION = '4.1'
 const API = 'https://api.deepseek.com/responses'
 const MODEL = 'deepseek-v4-flash'
 
@@ -79,21 +79,25 @@ function parseJsonLoose(text) {
   }
 }
 
-async function callDeepSeek(env, { instructions, input, maxOutputTokens }) {
+async function callDeepSeek(env, { instructions, input, maxOutputTokens, useSearch = true }) {
+  const body = {
+    model: MODEL,
+    instructions,
+    input,
+    max_output_tokens: maxOutputTokens,
+  }
+  // generate 主要依据 7 块画布写书，不需要联网；其他动作（dissect/revise/continue）启用 web_search
+  if (useSearch) {
+    body.tools = [{ type: 'web_search' }]
+    body.tool_choice = 'auto'
+  }
   const resp = await fetch(API, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${env.DEEPSEEK_API_KEY}`,
     },
-    body: JSON.stringify({
-      model: MODEL,
-      instructions,
-      input,
-      tools: [{ type: 'web_search' }], // ← 真联网搜索
-      tool_choice: 'auto',
-      max_output_tokens: maxOutputTokens,
-    }),
+    body: JSON.stringify(body),
   })
 
   if (!resp.ok) {
@@ -250,6 +254,7 @@ export default {
           instructions: GENERATE_SYSTEM,
           input: `画布内容如下：\n\n${compact}`,
           maxOutputTokens: 32000,
+          useSearch: false, // generate 依据 7 画布写书，关联网反而拖慢、易超时
         })
         // 归一化：outline 数组保留（UI 要渲染列表），其余字段压成字符串
         return ok(
