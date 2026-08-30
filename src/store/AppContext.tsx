@@ -114,11 +114,17 @@ function reducer(state: AppState, action: Action): AppState {
     case 'CLEAR_LIBRARY':
       return { ...state, library: [] }
     case 'UPDATE_CHAPTER': {
+      const now = new Date().toLocaleString('zh-CN')
       return {
         ...state,
         library: state.library.map(b =>
           b.id === action.bookId
-            ? { ...b, chapterWritings: { ...(b.chapterWritings ?? {}), [action.chapterIndex]: action.writing } }
+            ? {
+                ...b,
+                chapterWritings: { ...(b.chapterWritings ?? {}), [action.chapterIndex]: action.writing },
+                // 同步刷新书的最后更新时间，资产库会立刻看到
+                updatedAt: now,
+              }
             : b,
         ),
       }

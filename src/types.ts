@@ -76,6 +76,8 @@ export interface SavedBook {
   usedFallback: boolean
   engine: 'deepseek' | 'local'
   createdAt: string
+  /** 最后一次"内容相关操作"的时间（精修章节/补充等）。没改过就 fallback 到 createdAt */
+  updatedAt?: string
   /** 章节精修：每章单独精写过的正文。key 是 chapter.index */
   chapterWritings?: Record<number, ChapterWriting>
 }
