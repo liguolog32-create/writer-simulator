@@ -3,6 +3,7 @@ import { ModeSwitcher } from './components/ModeSwitcher'
 import { CanvasMatrix } from './components/CanvasMatrix'
 import { CanvasBlock } from './components/CanvasBlock'
 import { BookLibrary } from './components/BookLibrary'
+import { BookGenerator } from './components/BookGenerator'
 
 function Workbench() {
   const { state } = useApp()
@@ -16,7 +17,10 @@ function Workbench() {
             <p className="brand-sub">多画布并行编辑 · 一个链接两种入口</p>
           </div>
         </div>
-        <ModeSwitcher />
+        <div className="header-actions">
+          <BookGenerator />
+          <ModeSwitcher />
+        </div>
       </header>
       <main className="main">
         <aside className="sidebar">
