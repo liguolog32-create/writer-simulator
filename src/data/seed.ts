@@ -1,0 +1,60 @@
+import type { Canvas } from '../types'
+
+export const seedCanvases: Record<string, Canvas> = {
+  setting: {
+    id: 'setting',
+    dimension: '设定',
+    title: '设定 · 故事世界',
+    content: '架空王朝，灵气未绝，凡人与修行者共存。三千年前神族离场，留下十二枚祖器散布民间。',
+    anchors: [],
+    downstreams: ['character', 'plot'],
+  },
+  character: {
+    id: 'character',
+    dimension: '人物',
+    title: '人物 · 主角与关系网',
+    content: '沈长安，30 岁，沈家旁支，前朝旧臣之后。表面游学教书，暗中收集祖器，意图复辟。\n\n关键关系：\n- 父 沈砚（已故）\n- 师 陆九渊（已叛）\n- 挚友 谢青鸾（生）\n- 对手 萧皇后',
+    anchors: [],
+    downstreams: ['plot'],
+  },
+  style: {
+    id: 'style',
+    dimension: '文笔',
+    title: '文笔 · 语气与句法',
+    content: '冷峻克制，多短句与未完成句。比喻偏古物与器物。心理活动压到环境描写里，不直说。',
+    anchors: [],
+    downstreams: ['rhythm'],
+  },
+  structure: {
+    id: 'structure',
+    dimension: '结构',
+    title: '结构 · 章节与节奏',
+    content: '目标 18 万字，分三卷，每卷 6 章。\n- 卷一：开局，十二祖器现身\n- 卷二：寻器，三条线交叉\n- 卷三：终局，皇城对决',
+    anchors: [],
+    downstreams: ['rhythm'],
+  },
+  length: {
+    id: 'length',
+    dimension: '篇幅',
+    title: '篇幅 · 字数分配',
+    content: '总计 18 万字\n- 开篇 1.5 万\n- 主体 14 万\n- 收束 2.5 万\n单章 1 万字左右',
+    anchors: [],
+    downstreams: [],
+  },
+  plot: {
+    id: 'plot',
+    dimension: '情节',
+    title: '情节 · 主线与冲突',
+    content: '主角 6 年间寻找 12 祖器，途中被朝廷追杀，挚友反目，最终发现师门才是幕后黑手。',
+    anchors: [],
+    downstreams: ['rhythm'],
+  },
+  rhythm: {
+    id: 'rhythm',
+    dimension: '节奏',
+    title: '节奏 · 张力曲线',
+    content: '每 3 章一个小高潮，每卷一次反转。第二卷中段压到最低，第一卷末引爆祖器现身。',
+    anchors: [],
+    downstreams: [],
+  },
+}
