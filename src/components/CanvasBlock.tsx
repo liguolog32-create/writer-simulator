@@ -11,7 +11,7 @@ import {
 } from '../data/aiRecommendations'
 
 // 画布头部 ✨ AI 自动检索：按维度推 2 本书
-function CanvasBlock() {
+export function CanvasBlock() {
   const { state, dispatch, selectedCanvas, updateAnchor, removeAnchor, aiAppendAnchors } = useApp()
   const [aiState, setAiState] = useState<'idle' | 'loading' | 'done'>('idle')
   if (!selectedCanvas) return null
@@ -190,8 +190,6 @@ function AnchorAdder({ canvasId }: { canvasId: string }) {
     if (!selectedCanvas) return
     setFillState('loading')
     setNotFound('')
-    // 动态 import 取 bookLibrary
-    const { bookLibrary } = await import('../data/aiRecommendations')
     await new Promise(r => setTimeout(r, 900)) // 模拟检索耗时
     const userSource = source.trim()
     let result: { source: string; features: string; examples: string } | null = null
