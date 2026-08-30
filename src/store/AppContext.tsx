@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, type ReactNode } from 'react'
-import type { Action, AppState, Canvas, ReferenceAnchor } from '../types'
+import type { Action, AppState, Canvas, ReferenceAnchor, SavedBook } from '../types'
 import { seedCanvases } from '../data/seed'
 
 const STORAGE_KEY = 'writer-simulator-state-v1'
@@ -8,6 +8,25 @@ const initialState: AppState = {
   canvases: seedCanvases,
   selectedCanvasId: 'setting',
   mode: 'admin',
+  library: [],
+}
+
+/** 旧版 localStorage 没有 library 字段，必须补默认值，否则读档后 library 为 undefined 会崩 */
+function hydrateState(init: AppState): AppState {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) {
+      const saved = JSON.parse(raw) as Partial<AppState>
+      return {
+        ...init,
+        ...saved,
+        library: Array.isArray(saved.library) ? saved.library : [],
+      }
+    }
+  } catch (e) {
+    console.warn('hydrate failed', e)
+  }
+  return init
 }
 
 function reducer(state: AppState, action: Action): AppState {
@@ -83,7 +102,17 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_MODE':
       return { ...state, mode: action.mode }
     case 'RESET_TO_SEED':
-      return { ...initialState, mode: state.mode }
+      // 重置只清画布示例数据，保留用户辛苦生成的作品库
+      return { ...initialState, mode: state.mode, library: state.library }
+    case 'SAVE_BOOK': {
+      // 新的排最前，并限制总量避免撑爆 localStorage（约 5MB 上限）
+      const MAX = 60
+      return { ...state, library: [action.book, ...state.library].slice(0, MAX) }
+    }
+    case 'REMOVE_BOOK':
+      return { ...state, library: state.library.filter(b => b.id !== action.bookId) }
+    case 'CLEAR_LIBRARY':
+      return { ...state, library: [] }
     case 'HYDRATE':
       return action.state
     case 'AI_APPEND_ANCHORS': {
@@ -113,26 +142,35 @@ interface ContextValue {
   removeAnchor: (canvasId: string, anchorId: string) => void
   aiAppendAnchors: (canvasId: string, anchors: ReferenceAnchor[]) => void
   reset: () => void
+  saveBook: (book: SavedBook) => void
+  removeBook: (bookId: string) => void
+  clearLibrary: () => void
 }
 
 const AppContext = createContext<ContextValue | null>(null)
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, initialState, (init) => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY)
-      if (raw) return JSON.parse(raw) as AppState
-    } catch (e) {
-      console.warn('hydrate failed', e)
-    }
-    return init
-  })
+  const [state, dispatch] = useReducer(reducer, initialState, hydrateState)
 
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
     } catch (e) {
-      console.warn('persist failed', e)
+      // localStorage 有 ~5MB 上限，作品库存太多会 QuotaExceededError
+      const isQuota =
+        e instanceof DOMException &&
+        (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')
+      if (isQuota) {
+        console.warn('localStorage 已满，尝试裁掉最旧的作品后重试')
+        const trimmed: AppState = { ...state, library: state.library.slice(0, 20) }
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
+        } catch (e2) {
+          console.warn('裁减后仍失败，放弃持久化本次状态', e2)
+        }
+      } else {
+        console.warn('persist failed', e)
+      }
     }
   }, [state])
 
@@ -164,6 +202,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     aiAppendAnchors: (canvasId, anchors) =>
       dispatch({ type: 'AI_APPEND_ANCHORS', canvasId, anchors }),
     reset: () => dispatch({ type: 'RESET_TO_SEED' }),
+    saveBook: book => dispatch({ type: 'SAVE_BOOK', book }),
+    removeBook: bookId => dispatch({ type: 'REMOVE_BOOK', bookId }),
+    clearLibrary: () => dispatch({ type: 'CLEAR_LIBRARY' }),
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

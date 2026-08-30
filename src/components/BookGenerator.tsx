@@ -1,20 +1,67 @@
 import { useState } from 'react'
 import { useApp } from '../store/AppContext'
 import { generateBook, type GeneratedBook } from '../data/bookGenerator'
+import { generateBookLLM } from '../lib/llmClient'
 
 export function BookGenerator() {
-  const { state, listCanvases } = useApp()
+  const { state, listCanvases, saveBook } = useApp()
   const [state_, setState] = useState<'idle' | 'loading' | 'done'>('idle')
   const [book, setBook] = useState<GeneratedBook | null>(null)
   const [open, setOpen] = useState(false)
+  const [usedFallback, setUsedFallback] = useState(false)
+  const [searchInfo, setSearchInfo] = useState('')
+  const [fallbackReason, setFallbackReason] = useState('')
+
+  /** 把本次结果存档进作品库 */
+  const saveToLibrary = (
+    result: GeneratedBook,
+    opts: { usedFallback: boolean; searched: boolean; searchCount: number },
+  ) => {
+    saveBook({
+      ...result,
+      id: `book-${Date.now()}`,
+      searched: opts.searched,
+      searchCount: opts.searchCount,
+      usedFallback: opts.usedFallback,
+      engine: opts.usedFallback ? 'local' : 'deepseek',
+      createdAt: new Date().toLocaleString('zh-CN'),
+    })
+  }
 
   const handleGenerate = async () => {
     setState('loading')
     setOpen(true)
     setBook(null)
-    await new Promise(r => setTimeout(r, 1200)) // 模拟 AI 合成耗时
-    const result = generateBook(listCanvases())
-    setBook(result)
+    setUsedFallback(false)
+    setSearchInfo('')
+    setFallbackReason('')
+
+    // 把画布转成 Worker 期望的 { 维度名: 内容 } 形式
+    const canvasesForLLM: Record<string, string> = {}
+    listCanvases().forEach(c => { canvasesForLLM[c.dimension] = c.content })
+
+    try {
+      const { data: llm, searched, searchCount } = await generateBookLLM(canvasesForLLM)
+      setSearchInfo(
+        searched ? `🌐 已联网检索 ${searchCount} 次` : '（本次未触发联网检索，模型依据画布与已有知识创作）',
+      )
+      const produced: GeneratedBook = {
+        ...llm,
+        generatedAt: new Date().toLocaleString('zh-CN'),
+      }
+      setBook(produced)
+      saveToLibrary(produced, { usedFallback: false, searched, searchCount })
+    } catch (e) {
+      // LLM 失败 → 兜底用本地确定性生成（demo 不会挂），但把具体原因也显示出来
+      const reason = e instanceof Error ? e.message : String(e)
+      console.warn('LLM 生成失败，回退到本地生成器：', e)
+      setUsedFallback(true)
+      setFallbackReason(reason || '未知错误')
+      const produced = generateBook(listCanvases())
+      setBook(produced)
+      // 兜底产物也存档，但标记为未联网，用户回看时知道这份不靠谱
+      saveToLibrary(produced, { usedFallback: true, searched: false, searchCount: 0 })
+    }
     setState('done')
   }
 
@@ -34,7 +81,7 @@ export function BookGenerator() {
         disabled={state_ === 'loading'}
         title="根据 7 块画布的内容合成一本书"
       >
-        {state_ === 'loading' ? '合成中…' : '📖 生成文本'}
+        {state_ === 'loading' ? 'AI 创作中…' : '📖 生成文本'}
       </button>
 
       {open && (
@@ -49,7 +96,7 @@ export function BookGenerator() {
               </div>
               <div className="modal-actions">
                 <button className="ghost-btn" onClick={handleGenerate} disabled={state_ === 'loading'}>
-                  {state_ === 'loading' ? '合成中…' : '重新生成'}
+                  {state_ === 'loading' ? 'AI 创作中…' : '重新生成'}
                 </button>
                 <button className="ghost-btn" onClick={close}>
                   关闭
@@ -58,7 +105,7 @@ export function BookGenerator() {
             </header>
 
             <div className="modal-body">
-              {state_ === 'loading' && <p className="gen-loading">正在读取画布 → 合并约束 → 合成正文…</p>}
+              {state_ === 'loading' && <p className="gen-loading">正在读取 7 块画布 → DeepSeek 联网检索 + 创作 → 渲染结果（联网搜索模式下最长约 2 分钟）…</p>}
 
               {state_ === 'done' && book && (
                 <>
@@ -84,6 +131,7 @@ export function BookGenerator() {
                           参考锚点：{book.stats.anchorSources.join('、')}
                         </span>
                       )}
+                      {searchInfo && <span className="chip chip-teal">{searchInfo}</span>}
                     </div>
                   </section>
 
@@ -113,6 +161,15 @@ export function BookGenerator() {
                     )}
                   </section>
 
+                  {usedFallback && (
+                    <p className="gen-fallback">
+                      ⚠️ DeepSeek 调用失败，本次使用本地兜底生成器（模板确定性，结果不联网）。
+                      {fallbackReason && (
+                        <span className="gen-fallback-reason">原因：{fallbackReason}</span>
+                      )}
+                    </p>
+                  )}
+                  {searchInfo && <p className="gen-searchinfo">{searchInfo}</p>}
                   <p className="gen-meta">生成于 {book.generatedAt}</p>
                 </>
               )}

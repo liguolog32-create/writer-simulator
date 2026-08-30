@@ -9,6 +9,7 @@ import {
   dimensionFallback,
   dimensionBooks,
 } from '../data/aiRecommendations'
+import { analyzeBook } from '../lib/llmClient'
 
 // 画布头部 ✨ AI 自动检索：按维度推 2 本书
 export function CanvasBlock() {
@@ -179,41 +180,61 @@ function AnchorAdder({ canvasId }: { canvasId: string }) {
   const [examples, setExamples] = useState('')
   const [fillState, setFillState] = useState<'idle' | 'loading' | 'done'>('idle')
   const [notFound, setNotFound] = useState('')
+  const [searchInfo, setSearchInfo] = useState('')
   const reset = () => {
     setSource('')
     setFeatures('')
     setExamples('')
     setNotFound('')
+    setSearchInfo('')
   }
 
   const handleAIFill = async () => {
     if (!selectedCanvas) return
     setFillState('loading')
     setNotFound('')
-    await new Promise(r => setTimeout(r, 900)) // 模拟检索耗时
+    setSearchInfo('')
     const userSource = source.trim()
+    // 清空旧结果（避免上次成功的填充残留误导用户）
+    setFeatures('')
+    setExamples('')
     let result: { source: string; features: string; examples: string } | null = null
 
     if (userSource) {
-      // 优先级 1：用户输入的书名 → 在库中查
+      // 优先级 1：用户输入的书名 → 在本地库中查
       const hit = findBookInLibrary(userSource)
       if (hit) {
         const a = bookToAnchor(hit.key, hit.meta, selectedCanvas.dimension)
         result = { source: a.source, features: a.features, examples: a.examples }
       } else {
-        // 找不到 → 明确提示，不回退
-        setNotFound(userSource)
-        setFillState('idle')
-        return
+        // 优先级 2：本地没有 → 调 DeepSeek 联网分析（真 web_search）
+        try {
+          const { data: llm, searched, searchCount } = await analyzeBook(
+            userSource,
+            selectedCanvas.dimension,
+          )
+          result = {
+            source: llm.source || userSource,
+            features: llm.features || '',
+            examples: llm.examples || '',
+          }
+          setSearchInfo(
+            searched ? `🌐 已联网检索 ${searchCount} 次` : '⚠️ 未触发联网检索（模型凭已有知识回答，请留意准确性）',
+          )
+        } catch (e) {
+          setNotFound(`${userSource}（LLM 分析失败：${e instanceof Error ? e.message : String(e)}）`)
+          setFillState('idle')
+          return
+        }
       }
     } else {
-      // 优先级 2：source 空 → 按画布 content 关键词在书库里查
+      // 优先级 3：source 空 → 按画布 content 关键词在书库里查
       const hit = findBookByContent(selectedCanvas.content)
       if (hit) {
         const a = bookToAnchor(hit.key, hit.meta, selectedCanvas.dimension)
         result = { source: a.source, features: a.features, examples: a.examples }
       } else {
-        // 还没匹配上 → 用该维度的"分析角度"建议（不挂书名）
+        // 优先级 4：库也匹配不上 → 用该维度的通用分析角度（不挂书名）
         const fb = dimensionFallback[selectedCanvas.dimension]
         if (fb) {
           result = {
@@ -271,9 +292,10 @@ function AnchorAdder({ canvasId }: { canvasId: string }) {
         </label>
         {notFound && (
           <p className="not-found">
-            未在书库中找到「{notFound}」——请检查书名拼写，或换一本（联网搜索功能尚未接入）
+            {notFound}
           </p>
         )}
+        {searchInfo && <p className="search-info">{searchInfo}</p>}
         <div className="row">
           <button
             className="ai-mini-btn"
@@ -281,7 +303,7 @@ function AnchorAdder({ canvasId }: { canvasId: string }) {
             disabled={fillState !== 'idle'}
             title="按已填的来源查书库，匹配上自动填三栏"
           >
-            {fillState === 'loading' && 'AI 匹配中…'}
+            {fillState === 'loading' && (source.trim() ? 'AI 联网分析中…' : 'AI 匹配中…')}
             {fillState === 'done' && '✓ 已填三栏'}
             {fillState === 'idle' && '✨ AI 填充'}
           </button>
