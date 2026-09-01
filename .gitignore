@@ -8,3 +8,5 @@ dist-ssr
 *.log
 .vscode
 .idea
+baidu_sampler/samples_*.txt
+baidu_sampler/_folder_files.json

@@ -8,8 +8,19 @@ export function BookShelf() {
   const [activeId, setActiveId] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
 
-  const library = state.library
+  // 排序：最近修改/创建的排最前（让"刚精修过"的书浮上来）
+  const library = [...state.library].sort((a, b) => {
+    const ta = a.updatedAt ?? a.createdAt
+    const tb = b.updatedAt ?? b.createdAt
+    return tb.localeCompare(ta)
+  })
   const active = library.find(b => b.id === activeId) ?? null
+
+  const displayTime = (b: SavedBook) => b.updatedAt ?? b.createdAt
+  const isUpdated = (b: SavedBook) =>
+    Boolean(b.updatedAt) && b.updatedAt !== b.createdAt
+  const writtenCount = (b: SavedBook) =>
+    Object.keys(b.chapterWritings ?? {}).length
 
   const closeAll = () => {
     setOpen(false)
@@ -84,12 +95,21 @@ export function BookShelf() {
                         {b.stats.volumes} 卷 · {b.stats.chapters} 章 · 约{' '}
                         {(b.stats.totalWords / 10000).toFixed(1)} 万字
                       </p>
-                      <p className="shelf-meta">{b.createdAt}</p>
+                      <p className="shelf-meta">
+                        {displayTime(b)}
+                        {isUpdated(b) && <span className="shelf-updated"> · 已更新</span>}
+                      </p>
                       <div className="shelf-tags">
                         <span className={`chip ${b.usedFallback ? '' : 'chip-teal'}`}>
                           {b.usedFallback ? '本地兜底' : `🌐 联网 ${b.searchCount} 次`}
                         </span>
-                        <span className="chip chip-accent">{b.stats.styleLabel}</span>
+                        {writtenCount(b) > 0 ? (
+                          <span className="chip chip-accent">
+                            已精写 {writtenCount(b)}/{b.stats.chapters} 章
+                          </span>
+                        ) : (
+                          <span className="chip chip-accent">{b.stats.styleLabel}</span>
+                        )}
                       </div>
                       <p className="shelf-synopsis">{b.synopsis.slice(0, 80)}{b.synopsis.length > 80 ? '…' : ''}</p>
                       <button className="ghost-btn" onClick={() => setActiveId(b.id)}>

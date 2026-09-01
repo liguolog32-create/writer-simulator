@@ -107,6 +107,26 @@ export function continueText(text: string, canvases: Record<string, string>) {
   return callLLM<ContinueResult>({ action: 'continue', text, canvases })
 }
 
+/** 章节精修：输入前 N-1 章 + 本章设置 + 画布，输出本章正文 */
+export interface WriteChapterInput {
+  bookTitle: string
+  chapterIndex: number
+  chapterTitle: string
+  chapterSummary: string
+  settings: {
+    targetWords: number
+    style: string
+    purpose: 'transition' | 'main-plot' | 'reveal' | 'ending' | 'pure-scene'
+    extraRequirements: string
+  }
+  previousChapters: Array<{ title: string; content: string }>
+  canvases: Record<string, string>
+}
+
+export function writeChapter(input: WriteChapterInput) {
+  return callLLM<{ content: string; rationale: string }>({ action: 'writeChapter', ...input })
+}
+
 export function generateBookLLM(canvases: Record<string, string>) {
   return callLLM<GeneratedBookLLM>({ action: 'generate', canvases })
 }
