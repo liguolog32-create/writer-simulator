@@ -1,9 +1,73 @@
 import { useMemo, useRef, useState } from 'react'
 import { useApp } from '../store/AppContext'
 import { writeChapter } from '../lib/llmClient'
-import { PURPOSE_OPTIONS, purposeLabel, type ChapterPurpose, type ChapterWriting } from '../types'
+import { PURPOSE_OPTIONS, purposeLabel, type ChapterPurpose, type ChapterWriting, type SavedBook } from '../types'
 
 type Settings = ChapterWriting['settings']
+
+/* ===== 整书架构：起承转合 ===== */
+type PhaseRole = '起' | '承' | '转' | '合'
+type ChapterTag = '开局' | '推进' | '高潮' | '反转' | '收束'
+
+const TAG_TO_ROLE: Record<ChapterTag, PhaseRole> = {
+  开局: '起',
+  推进: '承',
+  高潮: '转',
+  反转: '转',
+  收束: '合',
+}
+
+const ROLE_DESC: Record<PhaseRole, string> = {
+  起: '交代背景、人物与世界',
+  承: '推进主线与冲突累积',
+  转: '关键转折 / 高潮 / 反转',
+  合: '伏笔回收与结局',
+}
+
+const ROLE_LABEL: Record<ChapterTag, string> = {
+  开局: '起 · 开局铺陈',
+  推进: '承 · 主线推进',
+  高潮: '转 · 关键高潮',
+  反转: '转 · 剧情反转',
+  收束: '合 · 伏笔回收',
+}
+
+type Phase = {
+  actNumber: number       // 第 N 幕
+  startIdx: number        // 0-based
+  endIdx: number          // 0-based
+  tag: ChapterTag
+  role: PhaseRole
+  label: string
+  roleDesc: string
+}
+
+/** 把连续相同 tag 的章节合并成一"幕"。每幕的角色由该 tag 决定。 */
+function computeArchitecture(outline: SavedBook['outline']): Phase[] {
+  if (!outline || outline.length === 0) return []
+  const phases: Phase[] = []
+  let start = 0
+  let curTag = outline[0].tag
+  for (let i = 1; i <= outline.length; i++) {
+    const tag: ChapterTag | null = i < outline.length ? outline[i].tag : null
+    if (tag !== curTag) {
+      phases.push({
+        actNumber: phases.length + 1,
+        startIdx: start,
+        endIdx: i - 1,
+        tag: curTag,
+        role: TAG_TO_ROLE[curTag],
+        label: ROLE_LABEL[curTag],
+        roleDesc: ROLE_DESC[TAG_TO_ROLE[curTag]],
+      })
+      if (tag) {
+        start = i
+        curTag = tag
+      }
+    }
+  }
+  return phases
+}
 
 const DEFAULT_SETTINGS: Settings = {
   targetWords: 2000,
@@ -25,6 +89,7 @@ export function ChapterWriter() {
   const { state, listCanvases, updateChapter } = useApp()
   const [bookId, setBookId] = useState<string>('')
   const [chapterIdx, setChapterIdx] = useState<number>(0)
+  const [highlightedPhaseIdx, setHighlightedPhaseIdx] = useState<number | null>(null)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [draftSettings, setDraftSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [writing, setWriting] = useState(false)
@@ -51,6 +116,20 @@ export function ChapterWriter() {
   )
   const chapter = book?.outline[chapterIdx] ?? null
   const existing = book?.chapterWritings?.[chapterIdx] ?? null
+  const architecture = useMemo(
+    () => (book ? computeArchitecture(book.outline) : []),
+    [book],
+  )
+
+  // 高亮幕切换 / 切书时清掉
+  const setPhase = (idx: number | null) => {
+    setHighlightedPhaseIdx(idx)
+  }
+  const isChapterHighlighted = (i: number) => {
+    if (highlightedPhaseIdx === null) return true
+    const p = architecture[highlightedPhaseIdx]
+    return p ? i >= p.startIdx && i <= p.endIdx : true
+  }
 
   // 进入章节时把已有 settings 载入草稿（如果存在）
   const loadChapter = (idx: number) => {
@@ -71,6 +150,7 @@ export function ChapterWriter() {
   const pickBook = (id: string) => {
     setBookId(id)
     setChapterIdx(0)
+    setHighlightedPhaseIdx(null)
     setOutput(null)
     setInfo('')
     setSavedFlash(false)
@@ -245,6 +325,47 @@ export function ChapterWriter() {
 
   return (
     <div className="workbench">
+      {/* 0. 整书架构（起承转合） */}
+      {book && architecture.length > 0 && (
+        <section className="wb-block">
+          <h3 className="wb-h3">
+            📐 整书架构 · 起承转合
+            <span style={{ fontWeight: 400, color: 'var(--fg-3)', marginLeft: 8, fontSize: 12 }}>
+              共 {book.outline.length} 章 · {architecture.length} 幕
+            </span>
+          </h3>
+          <div className="cw-arch-flow">
+            {architecture.map((p, i) => (
+              <div
+                key={i}
+                className={`cw-arc-card role-${p.role} ${highlightedPhaseIdx === i ? 'highlighted' : ''} ${highlightedPhaseIdx !== null && highlightedPhaseIdx !== i ? 'dimmed' : ''}`}
+                onClick={() => setPhase(highlightedPhaseIdx === i ? null : i)}
+                title={p.roleDesc}
+              >
+                <div className="cw-arc-head">
+                  <span className="cw-arc-num">第{p.actNumber}幕</span>
+                  <span className="cw-arc-role">{p.role}</span>
+                </div>
+                <div className="cw-arc-label">{p.label}</div>
+                <div className="cw-arc-range">
+                  第 {p.startIdx + 1}{p.endIdx > p.startIdx ? `–${p.endIdx + 1}` : ''} 章 · {p.endIdx - p.startIdx + 1} 章
+                </div>
+                <div className="cw-arc-tags">
+                  {book.outline.slice(p.startIdx, p.endIdx + 1).map((c, j) => (
+                    <span key={j} className={`tag tag-${c.tag}`} style={{ fontSize: 10, padding: '0 4px' }}>
+                      {c.tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="wb-desc" style={{ marginTop: 10 }}>
+            💡 点击任意一幕，下方章节列表会高亮对应范围。再点同一幕可取消。每章可单独精写，「一键精写全书」按章节 tag 自动决定写作目的（开局→纯场景、推进→推进主线、高潮/反转→揭示谜底、收束→交代结局）。
+          </p>
+        </section>
+      )}
+
       {/* 1. 选书 + 选章节 */}
       <section className="wb-block">
         <h3 className="wb-h3">1. 选书与章节</h3>
@@ -266,10 +387,11 @@ export function ChapterWriter() {
             <div className="cw-chapter-list">
               {book.outline.map((c, i) => {
                 const w = book.chapterWritings?.[i + 1]
+                const inPhase = isChapterHighlighted(i)
                 return (
                   <button
                     key={i}
-                    className={`cw-chap-btn ${i === chapterIdx ? 'active' : ''} ${w ? 'done' : ''}`}
+                    className={`cw-chap-btn ${i === chapterIdx ? 'active' : ''} ${w ? 'done' : ''} ${!inPhase ? 'dimmed' : ''}`}
                     onClick={() => loadChapter(i)}
                     title={c.summary}
                   >

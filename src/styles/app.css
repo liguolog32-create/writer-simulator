@@ -446,6 +446,74 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .cw-chap-idx { color: var(--fg-3); font-size: 11px; flex-shrink: 0; }
 .cw-chap-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cw-chap-mark { color: var(--teal); font-weight: 700; }
+.cw-chap-btn.dimmed { opacity: 0.35; filter: grayscale(0.6); }
+.cw-chap-btn.dimmed.active { opacity: 0.9; filter: none; }
+
+/* 整书架构 · 起承转合 */
+.cw-arch-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  align-items: stretch;
+}
+.cw-arc-card {
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  min-width: 140px;
+  max-width: 220px;
+  flex: 0 1 auto;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+  position: relative;
+}
+.cw-arc-card:hover {
+  border-color: var(--border-2);
+  transform: translateY(-1px);
+}
+.cw-arc-card.highlighted {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+.cw-arc-card.dimmed { opacity: 0.35; filter: grayscale(0.6); }
+.cw-arc-card.dimmed.highlighted { opacity: 1; filter: none; }
+.cw-arc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+.cw-arc-num {
+  color: var(--fg-3);
+  font-size: 11px;
+}
+.cw-arc-role {
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fg);
+}
+.cw-arc-card.role-起 .cw-arc-role { color: var(--teal); }
+.cw-arc-card.role-承 .cw-arc-role { color: var(--fg-2); }
+.cw-arc-card.role-转 .cw-arc-role { color: var(--danger); }
+.cw-arc-card.role-合 .cw-arc-role { color: var(--accent); }
+.cw-arc-label {
+  color: var(--fg-2);
+  font-size: 11px;
+  margin-top: 6px;
+}
+.cw-arc-range {
+  color: var(--fg);
+  font-size: 12px;
+  margin-top: 6px;
+}
+.cw-arc-tags {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
 
 .cw-settings { display: flex; flex-direction: column; gap: 14px; margin-bottom: 16px; }
 .cw-field { display: flex; flex-direction: column; gap: 6px; }
