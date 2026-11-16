@@ -10,3 +10,11 @@ dist-ssr
 .idea
 baidu_sampler/samples_*.txt
 baidu_sampler/_folder_files.json
+
+# 切分训练投喂素材可能含私有内容，只留产物 public/dict/userdict.txt 进版本库
+tools/feed/
+
+# 构建快照与本地产物，不进版本库
+.wrangler/
+dist-v*/
+vite.config.ts.timestamp-*.mjs

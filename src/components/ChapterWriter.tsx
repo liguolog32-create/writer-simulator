@@ -1,7 +1,14 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp } from '../store/AppContext'
-import { writeChapter } from '../lib/llmClient'
+import {
+  writeChapter,
+  directBookLLM,
+  calibrateText,
+  type DirectionBrief,
+  type CalibrateResult,
+} from '../lib/llmClient'
 import { PURPOSE_OPTIONS, purposeLabel, type ChapterPurpose, type ChapterWriting, type SavedBook } from '../types'
+import { WebSearchToggle, ReferenceList, webStatusText } from './WebSearchToggle'
 
 type Settings = ChapterWriting['settings']
 
@@ -85,17 +92,36 @@ const BATCH_TAG_PURPOSE: Record<string, ChapterPurpose> = {
   收束: 'ending',
 }
 
-export function ChapterWriter() {
-  const { state, listCanvases, updateChapter } = useApp()
-  const [bookId, setBookId] = useState<string>('')
+interface ChapterWriterProps {
+  /** 由外部（创作台）托管选书时传入；不传则自己管理，保持组件独立可用 */
+  bookId?: string
+  onBookChange?: (id: string) => void
+}
+
+export function ChapterWriter({ bookId: bookIdProp, onBookChange }: ChapterWriterProps = {}) {
+  const { state, listCanvases, updateChapter, lockedDimensions } = useApp()
+  const [bookIdState, setBookIdState] = useState<string>('')
+  // 外部托管时用外部值，否则用内部值 —— 这样两处选书能保持一致
+  const bookId = bookIdProp !== undefined ? bookIdProp : bookIdState
+  const setBookId = (id: string) => {
+    if (bookIdProp === undefined) setBookIdState(id)
+    onBookChange?.(id)
+  }
   const [chapterIdx, setChapterIdx] = useState<number>(0)
   const [highlightedPhaseIdx, setHighlightedPhaseIdx] = useState<number | null>(null)
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [draftSettings, setDraftSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [writing, setWriting] = useState(false)
   const [info, setInfo] = useState('')
-  const [output, setOutput] = useState<{ content: string; rationale: string } | null>(null)
+  const [output, setOutput] = useState<{ content: string; rationale: string; references?: string[] } | null>(null)
   const [savedFlash, setSavedFlash] = useState(false)
+  /** 联网搜同类型范文开关（默认关：精写以画布+前文为准；开则先检索同题材/同风格优秀范文作风格参照） */
+  const [webSearch, setWebSearch] = useState(false)
+  /** 用户写的「方向意图」：喂给方向导演层，让精修方向更精准 */
+  const [directionIntent, setDirectionIntent] = useState('')
+  /** 校准自检结果 */
+  const [cali, setCali] = useState<CalibrateResult | null>(null)
+  const [calibrating, setCalibrating] = useState(false)
 
   // 一键精写全书：进度与取消控制
   const [batch, setBatch] = useState<{
@@ -115,7 +141,8 @@ export function ChapterWriter() {
     [bookId, state.library],
   )
   const chapter = book?.outline[chapterIdx] ?? null
-  const existing = book?.chapterWritings?.[chapterIdx] ?? null
+  // 注意：chapterWritings 的 key 是 1-based（与 outline 的 0-based 下标差 1）
+  const existing = book?.chapterWritings?.[chapterIdx + 1] ?? null
   const architecture = useMemo(
     () => (book ? computeArchitecture(book.outline) : []),
     [book],
@@ -137,7 +164,7 @@ export function ChapterWriter() {
     setOutput(null)
     setInfo('')
     setSavedFlash(false)
-    const w = book?.chapterWritings?.[idx]
+    const w = book?.chapterWritings?.[idx + 1] // outline 0-based，chapterWritings 1-based
     if (w) {
       setDraftSettings(w.settings)
       setOutput({ content: w.content, rationale: '（这是已保存的版本，可直接重写）' })
@@ -156,13 +183,31 @@ export function ChapterWriter() {
     setSavedFlash(false)
     const b = state.library.find(x => x.id === id)
     if (b && b.outline[0]) {
-      const w0 = b.chapterWritings?.[0]
+      const w0 = b.chapterWritings?.[1] // 1-based
       setDraftSettings(w0?.settings ?? DEFAULT_SETTINGS)
       if (w0) setOutput({ content: w0.content, rationale: '（已保存）' })
     } else {
       setDraftSettings(DEFAULT_SETTINGS)
     }
   }
+
+  // 外部（创作台）换书时，把章节索引拉回第一张，避免索引越界
+  useEffect(() => {
+    setChapterIdx(0)
+    setHighlightedPhaseIdx(null)
+    setOutput(null)
+    setInfo('')
+    setSavedFlash(false)
+    const b = state.library.find(x => x.id === bookId)
+    if (b && b.outline[0]) {
+      const w0 = b.chapterWritings?.[1]
+      setDraftSettings(w0?.settings ?? DEFAULT_SETTINGS)
+      if (w0) setOutput({ content: w0.content, rationale: '（已保存）' })
+    } else {
+      setDraftSettings(DEFAULT_SETTINGS)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId])
 
   const goRel = (delta: number) => {
     if (!book) return
@@ -197,12 +242,18 @@ export function ChapterWriter() {
         settings: draftSettings,
         previousChapters,
         canvases: canvasesMap,
+        locked: lockedDimensions(),
+        webSearch,
+        directionIntent,
       })
       setOutput(data)
       setSettings(draftSettings)
-      setInfo(searched ? `🌐 联网检索 ${searchCount} 次` : '（未触发联网检索）')
+      setInfo(
+        webStatusText({ webSearch, searched, searchCount }) ||
+          '（未开启联网，仅依据画布与前文精写）',
+      )
     } catch (e) {
-      setInfo(`❌ 精写失败：${e instanceof Error ? e.message : String(e)}`)
+      setInfo(`精写失败：${e instanceof Error ? e.message : String(e)}`)
     }
     setWriting(false)
   }
@@ -218,6 +269,29 @@ export function ChapterWriter() {
     updateChapter(book.id, chapterIdx + 1, writing)
     setSavedFlash(true)
     setTimeout(() => setSavedFlash(false), 1800)
+  }
+
+  const handleCalibrate = async () => {
+    if (!output) return
+    setCalibrating(true)
+    setCali(null)
+    try {
+      const canvasesMap: Record<string, string> = {}
+      listCanvases().forEach(c => { canvasesMap[c.dimension] = c.content })
+      const brief: DirectionBrief | null = await directBookLLM(canvasesMap, directionIntent)
+      const r = await calibrateText(brief, output.content)
+      setCali(r)
+    } catch (e) {
+      console.warn('校准失败', e)
+    } finally {
+      setCalibrating(false)
+    }
+  }
+
+  const adoptFix = () => {
+    if (!cali?.fixedText || !output) return
+    setOutput(o => (o ? { ...o, content: cali.fixedText } : o))
+    setCali(null)
   }
 
   /** 一键精写全书：依次调用 writeChapter，purpose 按 outline tag 自动选 */
@@ -291,6 +365,7 @@ export function ChapterWriter() {
           settings: chapterSettings,
           previousChapters,
           canvases: canvasesMap,
+          locked: lockedDimensions(),
         })
         const writing: ChapterWriting = {
           content: data.content,
@@ -329,7 +404,7 @@ export function ChapterWriter() {
       {book && architecture.length > 0 && (
         <section className="wb-block">
           <h3 className="wb-h3">
-            📐 整书架构 · 起承转合
+            整书架构 · 起承转合
             <span style={{ fontWeight: 400, color: 'var(--fg-3)', marginLeft: 8, fontSize: 12 }}>
               共 {book.outline.length} 章 · {architecture.length} 幕
             </span>
@@ -361,7 +436,7 @@ export function ChapterWriter() {
             ))}
           </div>
           <p className="wb-desc" style={{ marginTop: 10 }}>
-            💡 点击任意一幕，下方章节列表会高亮对应范围。再点同一幕可取消。每章可单独精写，「一键精写全书」按章节 tag 自动决定写作目的（开局→纯场景、推进→推进主线、高潮/反转→揭示谜底、收束→交代结局）。
+            点击任意一幕，下方章节列表会高亮对应范围。再点同一幕可取消。每章可单独精写，「一键精写全书」按章节 tag 自动决定写作目的（开局→纯场景、推进→推进主线、高潮/反转→揭示谜底、收束→交代结局）。
           </p>
         </section>
       )}
@@ -473,15 +548,31 @@ export function ChapterWriter() {
                   onChange={e => setDraftSettings(s => ({ ...s, extraRequirements: e.target.value }))}
                 />
               </label>
+
+              <label className="cw-field">
+                <span className="cw-label">⑤ 方向意图（导演层）</span>
+                <textarea
+                  className="cw-textarea"
+                  rows={2}
+                  placeholder="告诉 AI 本章要往哪个方向走，例如：收紧节奏、制造悬念、让主角显露锋芒。留空则只按 7 画布。"
+                  value={directionIntent}
+                  onChange={e => setDirectionIntent(e.target.value)}
+                />
+              </label>
             </div>
 
             <div className="cw-actions">
+              <WebSearchToggle
+                checked={webSearch}
+                onChange={setWebSearch}
+                hint="开启后，AI 会先联网检索同类型（同题材 / 同风格）的优秀范文作为风格参照，再精写本章；默认关闭，以画布 + 前文为准"
+              />
               <button
                 className="primary-btn"
                 onClick={handleWrite}
                 disabled={writing || batch.running}
               >
-                {writing ? '精写中…' : existing ? '🔁 重新精写本章' : '✍️ 精写本章'}
+                {writing ? '精写中…' : existing ? '重新精写本章' : '精写本章'}
               </button>
               {!batch.running ? (
                 <button
@@ -489,11 +580,11 @@ export function ChapterWriter() {
                   onClick={() => handleBatchWrite(false)}
                   title="按 outline tag 自动选「文章目的」，逐章生成，已精写的会跳过"
                 >
-                  🚀 一键精写全书
+                  一键精写全书
                 </button>
               ) : (
                 <button className="ghost-btn cw-batch-btn" onClick={cancelBatch}>
-                  ✖ 取消
+                  取消
                 </button>
               )}
               <button className="ghost-btn" onClick={() => goRel(-1)} disabled={chapterIdx === 0}>
@@ -508,16 +599,16 @@ export function ChapterWriter() {
                 disabled={!output}
                 title={output ? '存入此章并刷新资产库时间' : '先生成本章才能保存'}
               >
-                {savedFlash ? '✓ 已保存到本书' : '💾 存入此章'}
+                {savedFlash ? '✓ 已保存到本书' : '存入此章'}
               </button>
             </div>
             {info && (
-              <p className={info.startsWith('❌') ? 'wb-warn' : 'wb-ok'} style={{ marginTop: 12 }}>{info}</p>
+              <p className={info.includes('失败') ? 'wb-warn' : 'wb-ok'} style={{ marginTop: 12 }}>{info}</p>
             )}
             {batch.running && (
               <div className="cw-batch-progress">
                 <div className="cw-batch-head">
-                  <span>🚀 正在精写全书</span>
+                  <span>正在精写全书</span>
                   <span>第 {batch.current}/{batch.total} 章 · {batch.currentTitle}</span>
                 </div>
                 <div className="cw-batch-bar">
@@ -529,13 +620,13 @@ export function ChapterWriter() {
                 <div className="cw-batch-stats">
                   <span className="cw-batch-stat done">✓ 完成 {batch.done}</span>
                   <span className="cw-batch-stat skip">⏭ 跳过 {batch.skipped}</span>
-                  {batch.errors > 0 && <span className="cw-batch-stat err">✗ 失败 {batch.errors}</span>}
+                  {batch.errors > 0 && <span className="cw-batch-stat err">失败 {batch.errors}</span>}
                 </div>
               </div>
             )}
             {batch.finished && !batch.running && (
               <p className="wb-ok" style={{ marginTop: 12 }}>
-                ✅ 批量精写完成：完成 {batch.done} · 跳过 {batch.skipped} · 失败 {batch.errors}
+                批量精写完成：完成 {batch.done} · 跳过 {batch.skipped} · 失败 {batch.errors}
                 （失败的可单独点章节重试）
               </p>
             )}
@@ -568,10 +659,37 @@ export function ChapterWriter() {
               {output.rationale && (
                 <p className="gen-beat">写作思路：{output.rationale}</p>
               )}
+              <ReferenceList references={output.references} />
               <div className="gen-prose">
                 {output.content.split('\n\n').map((p, i) => (
                   <p key={i}>{p}</p>
                 ))}
+              </div>
+              <div className="cw-cali">
+                <button className="ghost-btn" onClick={handleCalibrate} disabled={calibrating}>
+                  {calibrating ? '校准中…' : '校准本章方向'}
+                </button>
+                {cali && (
+                  <div className="cali-report">
+                    <span className={`cali-score ${cali.score >= 80 ? 'good' : cali.score >= 60 ? 'mid' : 'bad'}`}>
+                      方向一致度 {cali.score}/100
+                    </span>
+                    {cali.deviations.length > 0 ? (
+                      <ul className="cali-dev">
+                        {cali.deviations.map((d, i) => (
+                          <li key={i}>{d}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="cali-ok">✓ 未发现方向偏离</p>
+                    )}
+                    {cali.fixedText && cali.fixedText !== output.content && (
+                      <button className="ghost-btn ghost-accent" onClick={adoptFix}>
+                        采纳修正稿
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             </section>
           )}

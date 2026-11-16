@@ -58,3 +58,15 @@ export const seedCanvases: Record<string, Canvas> = {
     downstreams: [],
   },
 }
+
+// v10.52 串书修复：空白画布工厂。
+// 仅保留 7 个维度的 id / 维度名 / 标题（供 UI 显示正确的画布标签），
+// 内容清空、锚点清空、下游关系清空 —— 绝不带入上面演示种子里的「祖器」仙侠 demo 内容。
+// 导入旧书 / 缺画布维度的书时，缺失维度回落到空白画布，而不是回落到 demo，
+// 从而避免「我蒸汽朋克书里出现了别本书的祖器设定」这类串书污染。
+export const blankCanvases: Record<string, Canvas> = Object.fromEntries(
+  Object.entries(seedCanvases).map(([key, seed]) => [
+    key,
+    { ...seed, content: '', anchors: [], downstreams: [] },
+  ]),
+)

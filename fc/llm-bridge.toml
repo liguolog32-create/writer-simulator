@@ -1,0 +1,39 @@
+# ============================================================
+# 变体A · Worker 1：LLM 中转调度服务
+# 部署：cd fc && node <wrangler> deploy --config llm-bridge.toml
+# ============================================================
+name = "llm-bridge"
+main = "src/worker-llm-bridge.js"
+compatibility_date = "2025-01-01"
+
+[observability]
+enabled = true
+
+[vars]
+# 网关地址：**必须带路径** /api/fc-search（中转层直接 POST 到这里）
+GATEWAY_URL = "https://fc-gateway.liguolog32.workers.dev/api/fc-search"
+
+# ── LLM 通道：v10.71 起**只走站方 DeepSeek**（免费模型已取消）──────────
+#   代码仍保留 workers-ai 分支以备回滚，但这里显式指定 openai。
+LLM_PROVIDER = "openai"
+LLM_MODEL = "deepseek-chat"
+LLM_BASE_URL = "https://api.deepseek.com/v1"
+
+# 允许的前端来源（逗号分隔）；留空 = 回显请求 Origin（便于本地调试）
+# 商业化建议填死：ALLOWED_ORIGINS = "https://writer-simulator.pages.dev,https://staging.writer-simulator.pages.dev"
+ALLOWED_ORIGINS = ""
+
+# ⚠️ 关键：同一个 *.workers.dev 域下的两个 Worker **不能互相 fetch**（Cloudflare 错误 1042），
+# 必须走 Service Binding（同域直连，不经过公网、也更快）。
+[[services]]
+binding = "GATEWAY"
+service = "fc-gateway"
+
+# 会话计数（与网关共用同一个 namespace）
+[[kv_namespaces]]
+binding = "FC_SESSION_COUNTER"
+id = "3c7106186bd54ef79f88bf4de67f3753"
+
+# ⚠️ 密钥用 wrangler secret put 写入，严禁进仓库：
+#   INTERNAL_SECRET  （必须与 fc-gateway 完全一致）
+#   LLM_API_KEY      （只有 LLM_PROVIDER=openai 时才需要）

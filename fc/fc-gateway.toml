@@ -1,0 +1,35 @@
+# ============================================================
+# 变体A · Worker 2：FC 搜索安全网关
+# 部署：cd fc && node <wrangler> deploy --config fc-gateway.toml
+# ============================================================
+name = "fc-gateway"
+main = "src/worker-fc-gateway.js"
+compatibility_date = "2025-01-01"
+
+# 只做网关，不对外暴露业务接口；日志开起来方便排查被拦截的请求
+[observability]
+enabled = true
+
+[vars]
+# 搜索来源：
+#   free（默认）= 维基百科优先 + DuckDuckGo 兜底，**都不需要密钥、不按次计费**
+#   wiki / ddg   = 只用其中一个
+#   tavily / bing= 商业服务商（要密钥、有免费额度、用完要付费 —— 本项目默认不用）
+SEARCH_PROVIDER = "free"
+# 签名时间戳允许的偏差（秒）；设为 0 关闭防重放（不建议）
+REPLAY_WINDOW_SEC = "300"
+
+# 会话计数：中转层主控制 + 网关兜底共用
+[[kv_namespaces]]
+binding = "FC_SESSION_COUNTER"
+id = "3c7106186bd54ef79f88bf4de67f3753"
+
+# 脱敏审计日志
+[[kv_namespaces]]
+binding = "FC_AUDIT_LOG"
+id = "83d9e60063fb4c08afcbb53dd0a09927"
+
+# ⚠️ 密钥用 wrangler secret put 写入，严禁进仓库：
+#   INTERNAL_SECRET   （必须与 llm-bridge 完全一致）
+#   TAVILY_API_KEY / BING_SEARCH_KEY —— 只有把 SEARCH_PROVIDER 改成商业服务商时才需要
+#   默认的 free 源（维基 + DDG）不需要任何密钥。

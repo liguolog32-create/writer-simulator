@@ -1,7 +1,7 @@
 import type { ReferenceAnchor } from '../types'
 
-type DimAnalysis = { feature: string; example: string }
-type BookMeta = {
+export type DimAnalysis = { feature: string; example: string }
+export type BookMeta = {
   author: string
   tags: string[]
   byDimension: Record<string, DimAnalysis>
@@ -9,6 +9,10 @@ type BookMeta = {
 
 // 模拟书库：按书名索引。真实接入后这块换成"百度网盘 /小说合集 + 联网搜索"。
 // 命中规则：用户输入含书名关键词即匹配（不区分大小写、不含标点）。
+//
+// ⚠️ 这份是**打包进产物的默认语料**，是站点的保底内容。
+//    管理员在「管理后台 → 平台语料」里做的增删改会落到 KV 覆盖层（见文件末尾），
+//    运行时以覆盖层优先、默认语料兜底 —— 覆盖层改坏了也不会让站点开天窗。
 export const bookLibrary: Record<string, BookMeta> = {
   '《上膳书》作者：三水小草': {
     author: "三水小草",
@@ -1548,7 +1552,7 @@ export function findBookInLibrary(input: string): { key: string; meta: BookMeta 
   const normalized = input.replace(/[\s《》\u3000，。、！？：；·—\-]/g, '').toLowerCase()
   if (!normalized) return null
   // 1. 精确包含：输入是书名的子串
-  for (const [key, meta] of Object.entries(bookLibrary)) {
+  for (const [key, meta] of Object.entries(currentLibrary())) {
     const k = key.toLowerCase()
     if (normalized.includes(k) || k.includes(normalized)) {
       return { key, meta }
@@ -1581,7 +1585,7 @@ export function findBookByContent(content: string): { key: string; meta: BookMet
   const c = content.toLowerCase()
   if (!c.trim()) return null
   let best: { key: string; meta: BookMeta; score: number } | null = null
-  for (const [key, meta] of Object.entries(bookLibrary)) {
+  for (const [key, meta] of Object.entries(currentLibrary())) {
     let score = 0
     for (const tag of meta.tags) {
       if (c.includes(tag.toLowerCase())) score += 1
@@ -1634,4 +1638,67 @@ export const dimensionBooks: Record<string, string[]> = {
   篇幅: ['上膳书', '狼亲狈友', '活着'],
   情节: ['重生追缉令', '大宋法证先锋', '嫌疑人X的献身'],
   节奏: ['倾然自喜', '金玉为糖，拐个醋王', '老人与海'],
+}
+
+/* ============================================================
+   平台语料覆盖层（管理员可改的那一层）
+   ------------------------------------------------------------
+   打包进产物的默认语料是只读的，改不了。管理员在
+   「管理后台 → 平台语料」里做的新增/覆盖/删除落到 Worker 的 KV
+   （app:platform:corpus），页面启动时拉下来挂在这一层。
+
+   合并规则：
+   · 覆盖层里是 BookMeta → 覆盖同名的默认条目
+   · 覆盖层里是 null     → 墓碑：这本书被站主删了，默认语料不再生效
+   · 默认语料里独有的    → 原样保留
+
+   为什么做成「叠加」而不是「替换」：覆盖层是网络来的，可能拉不到、
+   可能被改坏。叠加上默认层，最坏情况就是退回出厂语料，站点不会没内容。
+   ============================================================ */
+
+/** null = 墓碑（删掉这本书） */
+type CorpusOverlay = Record<string, BookMeta | null>
+
+let corpusOverlay: CorpusOverlay = {}
+let corpusMeta: { updatedAt: string | null; updatedBy: string | null } = {
+  updatedAt: null,
+  updatedBy: null,
+}
+
+/** 由 AppContext 在 platformGet 成功后调用；传 null/空即退回纯默认语料 */
+export function setCorpusOverlay(
+  books: CorpusOverlay | null,
+  meta?: { updatedAt?: string | null; updatedBy?: string | null },
+) {
+  corpusOverlay = books && typeof books === 'object' ? books : {}
+  corpusMeta = { updatedAt: meta?.updatedAt ?? null, updatedBy: meta?.updatedBy ?? null }
+}
+
+export function getCorpusMeta() {
+  return {
+    ...corpusMeta,
+    overrideCount: Object.keys(corpusOverlay).length,
+    tombstoneCount: Object.values(corpusOverlay).filter(v => v === null).length,
+  }
+}
+
+/** 合并后的书库（默认层 + 覆盖层）—— 所有检索都必须走这里 */
+export function currentLibrary(): Record<string, BookMeta> {
+  const out: Record<string, BookMeta> = { ...bookLibrary }
+  for (const [k, v] of Object.entries(corpusOverlay)) {
+    if (v === null) delete out[k]
+    else out[k] = v
+  }
+  return out
+}
+
+/** 单本查询：比 currentLibrary()[k] 少一次全量展开，画布推荐按钮用 */
+export function lookupBook(key: string): BookMeta | null {
+  if (Object.prototype.hasOwnProperty.call(corpusOverlay, key)) return corpusOverlay[key]
+  return bookLibrary[key] ?? null
+}
+
+/** 默认（出厂）语料的书名清单 —— 管理后台据此区分「内置」与「已覆盖」 */
+export function defaultBookKeys(): string[] {
+  return Object.keys(bookLibrary)
 }

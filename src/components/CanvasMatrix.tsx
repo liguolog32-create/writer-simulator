@@ -1,9 +1,9 @@
 import { useApp } from '../store/AppContext'
 
 export function CanvasMatrix() {
-  const { state, dispatch, listCanvases, listDownstreamTargets, reset } = useApp()
+  const { state, dispatch, canEdit, listCanvases, reset } = useApp()
   const canvases = listCanvases()
-  const editing = state.mode === 'admin'
+  const editing = canEdit
 
   return (
     <div className="canvas-matrix">

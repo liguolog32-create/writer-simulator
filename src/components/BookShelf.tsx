@@ -1,4 +1,6 @@
+import { Icon } from './Icon'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useApp } from '../store/AppContext'
 import type { SavedBook } from '../types'
 
@@ -32,14 +34,20 @@ export function BookShelf() {
     <>
       <button
         className="gen-btn shelf-btn"
-        onClick={() => setOpen(true)}
-        title="查看历次生成的作品"
+        onClick={() => {
+          // v10.42 LIB-01：作品库已经是独立页面（#/library），点这里直接跳过去。
+          // 弹窗版本留在这里没删，但已经不会被触发（open 永远是 false）。
+          window.location.hash = '#/library'
+        }}
+        title="打开作品库页面（可搜索 / 排序 / 直达工作台）"
       >
-        📚 作品库{library.length > 0 && ` (${library.length})`}
+        <Icon name="book" /> 作品库{library.length > 0 && ` (${library.length})`}
       </button>
 
-      {open && (
-        <div className="modal-mask" onClick={closeAll}>
+      {/* portal 到 body：顶栏 backdrop-filter 会把 fixed 遮罩困在顶栏内（v11 回归） */}
+      {open &&
+        createPortal(
+          <div className="modal-mask" onClick={closeAll}>
           <div className="modal shelf-modal" onClick={e => e.stopPropagation()}>
             <header className="modal-head">
               <div>
@@ -75,7 +83,8 @@ export function BookShelf() {
             <div className="modal-body">
               {library.length === 0 ? (
                 <p className="gen-loading">
-                  还没有作品。去右上角点「📖 生成文本」，AI 合成的书会自动存进这里。
+                  还没有作品。去「多画布 · 合成新书」页点「一键生成整本书」（或创作台「作品」那一行同款按钮），
+                  AI 合成的书会自动存进这里。
                 </p>
               ) : (
                 <div className="shelf-grid">
@@ -101,7 +110,7 @@ export function BookShelf() {
                       </p>
                       <div className="shelf-tags">
                         <span className={`chip ${b.usedFallback ? '' : 'chip-teal'}`}>
-                          {b.usedFallback ? '本地兜底' : `🌐 联网 ${b.searchCount} 次`}
+                          {b.usedFallback ? '本地兜底' : `联网 ${b.searchCount} 次`}
                         </span>
                         {writtenCount(b) > 0 ? (
                           <span className="chip chip-accent">
@@ -121,11 +130,13 @@ export function BookShelf() {
               )}
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )}
 
-      {active && (
-        <div className="modal-mask" onClick={() => setActiveId(null)}>
+      {active &&
+        createPortal(
+          <div className="modal-mask" onClick={() => setActiveId(null)}>
           <div className="modal shelf-modal" onClick={e => e.stopPropagation()}>
             <header className="modal-head">
               <div>
@@ -150,7 +161,7 @@ export function BookShelf() {
                   <span className="chip">约 {(active.stats.totalWords / 10000).toFixed(1)} 万字</span>
                   <span className="chip chip-accent">文笔：{active.stats.styleLabel}</span>
                   <span className={`chip ${active.usedFallback ? '' : 'chip-teal'}`}>
-                    {active.usedFallback ? '本地兜底生成' : `🌐 联网检索 ${active.searchCount} 次`}
+                    {active.usedFallback ? '本地兜底生成' : `联网检索 ${active.searchCount} 次`}
                   </span>
                 </div>
               </section>
@@ -187,8 +198,9 @@ export function BookShelf() {
               </section>
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+          document.body,
+        )}
     </>
   )
 }
@@ -203,7 +215,7 @@ function exportBook(b: SavedBook) {
   )
   lines.push('')
   lines.push(
-    `> 生成方式：${b.usedFallback ? '本地兜底生成器（未联网）' : `DeepSeek 联网检索 ${b.searchCount} 次`}`,
+    `> 生成方式：${b.usedFallback ? '本地兜底生成器（未联网）' : `优质模型生产联网检索 ${b.searchCount} 次`}`,
     '',
   )
   lines.push('## 简介', '', b.synopsis, '')

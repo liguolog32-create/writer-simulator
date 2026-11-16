@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useApp } from '../store/AppContext'
 
 const MALE = [
   '偏执病娇', '斯文败类', '闷骚爱吃醋', '病娇深情', '强大深情',
@@ -18,8 +19,12 @@ const AUTHOR = [
 ]
 
 export function BookLibrary() {
+  const { isAdmin } = useApp()
   const [q, setQ] = useState('')
   const match = (s: string) => !q.trim() || s.includes(q.trim())
+  // 「书库类型」是内部素材盘点，只对管理员开放；普通用户直接不渲染这块。
+  // 门禁放在组件内部（而不是调用处），避免别处误渲染时绕过判断。
+  if (!isAdmin) return null
   return (
     <section className="library">
       <header className="library-head">
