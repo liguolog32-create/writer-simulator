@@ -26,6 +26,7 @@ import {
   type ChapterWriting,
   type SavedBook,
 } from '../types'
+import { SourceHarvest } from './SourceHarvest'
 
 type Tab = 'dissect' | 'chapters' | 'loose' | 'script'
 
@@ -459,15 +460,21 @@ export function Workbench({
 
   /* ================= 风格拆解 ================= */
 
-  const handleDissect = async () => {
-    if (!text.trim()) return
+  /**
+   * v10.80：支持外部直接喂语料（灵感采集面板「组装并拆解」按钮用）——
+   * 不必先写回原文框再点拆解，避免一次异步状态竞态。
+   * overrideText 不传时保持原行为：拆解原文框里的 text。
+   */
+  const handleDissect = async (overrideText?: string) => {
+    const source = (overrideText ?? text).trim()
+    if (!source) return
     setDissecting(true)
     setDissectInfo('')
     setDissectResult(null)
     const snap = snapshotCanvases()
     let dims: Record<string, string> | null = null
     try {
-      const { data, searched, searchCount } = await dissectText(text, lockedDimensions())
+      const { data, searched, searchCount } = await dissectText(source, lockedDimensions())
       dims = data
       setDissectInfo(
         `已由 优质模型生产 拆解并填充 7 个画布${searched ? `（联网检索 ${searchCount} 次）` : ''}。下方是每块画布分配到的内容。`,
@@ -475,7 +482,7 @@ export function Workbench({
     } catch (e) {
       const reason = e instanceof Error ? e.message : String(e)
       console.warn('LLM 拆解失败，用本地启发式：', e)
-      dims = dissectTextLocally(text)
+      dims = dissectTextLocally(source)
       setDissectInfo(
         `优质模型生产 不可用（${reason.slice(0, 80)}），已用「本地启发式」填充 7 个画布。`,
       )
@@ -1976,6 +1983,19 @@ export function Workbench({
           <BookGenerator variant="inline" />
         </div>
       </section>
+
+      {/* v10.80 灵感采集：多渠道抓取（知乎/小红书/抖音/Reddit/X）→ 组语料 → 拆解改编。
+          放在写作页顶部、默认折叠：不抓取时完全不占版面。 */}
+      <SourceHarvest
+        onCorpus={(corpus, mode) => {
+          if (mode === 'replace') setText(corpus)
+          else setText(prev => (prev.trim() ? `${prev}\n\n${corpus}` : corpus))
+        }}
+        onDissect={corpus => {
+          void handleDissect(corpus)
+        }}
+        dissectBusy={dissecting}
+      />
 
       {/* 全局运行状态 —— 切 tab 不中断任务 */}
       {running && (

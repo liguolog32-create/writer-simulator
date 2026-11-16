@@ -4,7 +4,7 @@
 // GET /：返回 { ok: true, version, model, status } 用于确认线上版本
 // 环境变量：DEEPSEEK_API_KEY
 
-const VERSION = '10.79'
+const VERSION = '10.80'
 const API = 'https://api.deepseek.com/responses'
 const MODEL = 'deepseek-v4-flash'
 
@@ -3632,6 +3632,384 @@ function sanitizeObsRecord(r) {
   }
 }
 
+/* ============================================================
+   灵感采集 · 多渠道抓取 fetchers（v10.80）
+   ============================================================ */
+const HARVEST_CHANNELS = ['zhihu', 'xhs', 'douyin', 'reddit', 'x']
+const HARVEST_UA =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+
+/** 灵感采集专用 GET：超时可控、可带 cookie（cookie 只发给目标站点） */
+async function harvestGet(url, { headers = {}, cookie = '', timeoutMs = 20000 } = {}) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  try {
+    const h = {
+      'User-Agent': HARVEST_UA,
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      ...headers,
+    }
+    if (cookie) h['Cookie'] = cookie
+    const resp = await fetch(url, { headers: h, redirect: 'follow', signal: ctrl.signal })
+    return { status: resp.status, text: await resp.text(), finalUrl: resp.url || url }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** 极简 HTML → 纯文本（灵感采集够用：去标签 + 常见实体解码） */
+function harvestStripHtml(html) {
+  return toStr(html)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&mdash;/g, '—')
+    .replace(/&hellip;/g, '…')
+    .replace(/&ldquo;|&rdquo;/g, '"')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+/** 粗判语料语言：中文/俄文/日文/韩文/英文（多语言资料标注用） */
+function harvestLangOf(text) {
+  const t = toStr(text)
+  if (!t) return 'en'
+  const n = t.length
+  if (((t.match(/[\u4e00-\u9fff\u3400-\u4dbf]/g) || []).length / n) > 0.12) return 'zh'
+  if (((t.match(/[\u0400-\u04ff]/g) || []).length / n) > 0.12) return 'ru'
+  if (((t.match(/[\u3040-\u30ff]/g) || []).length / n) > 0.08) return 'ja'
+  if (((t.match(/[\uac00-\ud7af]/g) || []).length / n) > 0.08) return 'ko'
+  return 'en'
+}
+
+/** 从一段输入里抠出所有 http(s) 链接（X / 小红书的链接模式） */
+function harvestExtractLinks(query) {
+  const links = toStr(query).match(/https?:\/\/[^\s，,、"“”'’<>()【】]+/g) || []
+  return links.map(s => s.replace(/[).,;，。；]+$/, '')).filter(Boolean)
+}
+
+// —— Reddit：Arctic Shift 归档库（匿名可用）。
+//    query 形如 "r/子版块" 或 "r/子版块 关键词"：近 30 天出勤按赞数排序，关键词过滤标题+正文。
+//    跨设备要求：服务端路径必须在 Cloudflare 出口就能跑通（不能依赖调用者的本地网络）。
+//    注：Arctic Shift 本身架在 Cloudflare 上，Worker 出口直抓会被它的源站防火墙 522 掉
+//    （CF→CF 环路），所以这里维护一条多中继链逐个试：直抓 → jina reader → corsproxy → allorigins。
+//    每条中继换一个出口网络，任一通即用；全挂才报错（错误里带各路线结果，方便定位）。
+const ARCTIC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+async function harvestArcticPage(u) {
+  const routes = [
+    ['direct', u],
+    ['jina', `https://r.jina.ai/${u}`],
+    ['corsproxy', `https://corsproxy.io/?url=${encodeURIComponent(u)}`],
+    ['allorigins', `https://api.allorigins.win/raw?url=${encodeURIComponent(u)}`],
+  ]
+  const fails = []
+  for (const [name, url] of routes) {
+    try {
+      const { text, status } = await harvestGet(url, { headers: { 'User-Agent': ARCTIC_UA }, timeoutMs: 25000 })
+      if (status !== 200) {
+        fails.push(`${name}:HTTP${status}`)
+        continue
+      }
+      // jina/corsproxy 可能包一层 markdown 头（Title:/URL Source:…），从第一个 { 开始抠 JSON
+      const start = text.indexOf('{')
+      const candidate = start > 0 ? text.slice(start) : text
+      try {
+        const posts = (JSON.parse(candidate) || {}).data || []
+        if (posts.length) return posts
+        if ((JSON.parse(candidate) || {}).data) return [] // 合法的空页（翻到头）
+        fails.push(`${name}:空数据`)
+      } catch {
+        fails.push(`${name}:非JSON`)
+      }
+    } catch (e) {
+      fails.push(`${name}:${safeStr(e).slice(0, 40)}`)
+    }
+  }
+  throw `Reddit 归档库所有路线均不可达（${fails.join('；')}）`
+}
+
+async function harvestReddit({ query, limit }) {
+  const m = query.match(/^r\/([A-Za-z0-9_]+)\b\s*(.*)$/i)
+  const sub = (m ? m[1] : '').trim() || (query && !query.includes(' ') ? query : 'nosleep')
+  const kw = (m ? m[2] : '').trim().toLowerCase()
+  const since = new Date(Date.now() - 30 * 86400e3).toISOString().slice(0, 10)
+  let before = new Date(Date.now() + 86400e3).toISOString().slice(0, 10)
+  const all = []
+  for (let page = 0; page < 25; page++) {
+    const u = `https://arctic-shift.photon-reddit.com/api/posts/search?subreddit=${encodeURIComponent(
+      sub,
+    )}&sort_type=created_utc&sort=desc&limit=100&after=${since}&before=${before}`
+    const posts = await harvestArcticPage(u)
+    if (!posts.length) break
+    all.push(...posts)
+    const lastCu = Number(posts[posts.length - 1].created_utc)
+    if (!lastCu) break
+    const next = new Date((lastCu - 1) * 1000).toISOString().slice(0, 19)
+    if (next <= since || next >= before) break
+    before = next
+  }
+  let stories = all.filter(
+    p =>
+      p.selftext &&
+      p.selftext !== '[removed]' &&
+      p.selftext !== '[deleted]' &&
+      p.selftext.length > 400 &&
+      !p.stickied,
+  )
+  if (kw) stories = stories.filter(p => `${p.title}\n${p.selftext}`.toLowerCase().includes(kw))
+  stories.sort((a, b) => (b.score || 0) - (a.score || 0))
+  const items = stories.slice(0, limit).map(p => ({
+    id: toStr(p.id),
+    title: toStr(p.title),
+    text: toStr(p.selftext).slice(0, 20000),
+    author: 'u/' + toStr(p.author),
+    metrics: `${p.score || 0} 赞 · ${p.num_comments || 0} 评论`,
+    lang: harvestLangOf(`${p.title} ${p.selftext}`),
+    url: 'https://reddit.com' + toStr(p.permalink),
+  }))
+  return {
+    channel: 'reddit',
+    items,
+    note: `r/${sub} 近 30 天扫描 ${all.length} 帖 → 入选 ${items.length} 条（按赞数排序）${
+      kw ? `，关键词「${kw}」` : ''
+    }。Reddit 帖子多为英文/多语种，拆解与改编支持任意语言原文。`,
+  }
+}
+
+// —— 知乎：匿名=热榜（标题+热度+链接）；带登录 Cookie=每题再抓前 2 条答案正文。
+//    关键词搜索接口需要签名（x-zse-96），暂不硬凑：热榜 + Cookie 正文已够改编素材。
+async function harvestZhihu({ query, limit, cookie }) {
+  const { text, status } = await harvestGet(
+    `https://api.zhihu.com/topstory/hot-list?limit=50`,
+    { headers: { Referer: 'https://www.zhihu.com/hot' }, cookie, timeoutMs: 15000 },
+  )
+  if (status !== 200) throw `知乎热榜返回 ${status}（可能被风控，稍后再试）`
+  const list = ((JSON.parse(text) || {}).data) || []
+  const hot = list
+    .map(p => {
+      const t = p.target || {}
+      const qid = toStr(t.id) || toStr(p.card_id || '').replace(/^Q_/, '')
+      return {
+        qid,
+        title: toStr(t.title) || toStr(t.title_text),
+        excerpt: toStr(t.excerpt),
+        heat: toStr(p.detail_text),
+        type: toStr(t.type),
+      }
+    })
+    .filter(x => x.qid && x.title)
+    .slice(0, limit)
+  const items = []
+  for (const q of hot) {
+    const item = {
+      id: q.qid,
+      title: q.title,
+      text: q.excerpt,
+      author: '知乎热榜',
+      metrics: q.heat,
+      lang: 'zh',
+      url: `https://www.zhihu.com/question/${q.qid}`,
+    }
+    // 有登录 Cookie 才尝试抓答案正文（匿名接口 403 need_login，直接跳过）
+    if (cookie && cookie.includes('z_c0')) {
+      try {
+        const { text: feedText, status: fs } = await harvestGet(
+          `https://www.zhihu.com/api/v4/questions/${q.qid}/feeds?limit=2&include=content`,
+          { headers: { Referer: `https://www.zhihu.com/question/${q.qid}` }, cookie, timeoutMs: 15000 },
+        )
+        if (fs === 200) {
+          const feeds = ((JSON.parse(feedText) || {}).data) || []
+          const bodies = []
+          for (const f of feeds.slice(0, 2)) {
+            const a = f.target || {}
+            const content = harvestStripHtml(toStr(a.content) || toStr(a.excerpt))
+            if (content) {
+              const votes = Number(a.voteupCount ?? a.voteup_count ?? 0)
+              bodies.push(`【答主 ${toStr((a.author || {}).name) || '匿名'} · ${votes} 赞】\n${content.slice(0, 4000)}`)
+              const aid = toStr(a.id)
+              if (aid) item.url = `https://www.zhihu.com/question/${q.qid}/answer/${aid}`
+            }
+          }
+          if (bodies.length) {
+            item.text = q.excerpt ? `${q.excerpt}\n\n${bodies.join('\n\n')}` : bodies.join('\n\n')
+            item.author = '知乎（含答案正文）'
+          }
+        }
+      } catch {
+        /* 答案抓不到就只留热榜摘要 */
+      }
+    }
+    items.push(item)
+  }
+  const kwNote = query
+    ? `（关键词搜索需登录签名，本次按热榜返回；可从结果里挑相关的问题）`
+    : ''
+  const cookieNote = cookie && cookie.includes('z_c0') ? '' : '；未检测到登录 Cookie（z_c0），只返回热榜摘要——设置里粘贴知乎 Cookie 可抓答案正文'
+  return {
+    channel: 'zhihu',
+    items,
+    note: `知乎热榜抓取 ${items.length} 条${kwNote}${cookieNote}。`,
+  }
+}
+
+// —— 抖音：热搜榜（匿名可用）。关键词搜索需 a_bogus 签名，暂不支持；
+//    热搜词可当「灵感种子」直接拆解，或配合其他渠道的正文一起组语料。
+async function harvestDouyin({ limit }) {
+  const { text, status } = await harvestGet('https://www.douyin.com/aweme/v1/web/hot/search/list/', {
+    headers: { Referer: 'https://www.douyin.com/hot' },
+    timeoutMs: 15000,
+  })
+  if (status !== 200) throw `抖音热搜返回 ${status}（接口可能改版，稍后再试）`
+  const wordList = (((JSON.parse(text) || {}).data) || {}).word_list || []
+  const items = wordList.slice(0, limit).map((w, i) => {
+    const word = toStr(w.word)
+    const sid = toStr(w.sentence_id)
+    return {
+      id: sid || `hot-${i}`,
+      title: word,
+      // 热搜词条本身没有正文；title 就是话题，链接落到抖音搜索页
+      text: toStr(w.event_word || ''),
+      author: '抖音热搜',
+      metrics: `${Number(w.hot_value || 0)} 热度`,
+      lang: 'zh',
+      url: sid ? `https://www.douyin.com/hot/${sid}` : `https://www.douyin.com/search/${encodeURIComponent(word)}`,
+    }
+  })
+  return {
+    channel: 'douyin',
+    items,
+    note: `抖音热搜榜抓取 ${items.length} 条（话题即灵感种子；App 内关键词搜索需签名暂不支持）。`,
+  }
+}
+
+// —— 小红书：网页接口有风控（匿名抓笔记页会被 302 到验证页）。
+//    必须带登录 Cookie（a1 + web_session）；query = 笔记/分享链接（每行或空格分隔，最多 limit 条）。
+async function harvestXhs({ query, limit, cookie }) {
+  const links = harvestExtractLinks(query).slice(0, limit)
+  if (!links.length) {
+    throw '请在输入框粘贴小红书笔记或分享链接（每行一条，如 https://www.xiaohongshu.com/explore/xxxx 或 https://xhslink.com/xxxx）'
+  }
+  if (!cookie || !cookie.includes('web_session')) {
+    throw '小红书网页有风控，需要登录 Cookie：点本面板「Cookie 设置」，把小红书网页版（www.xiaohongshu.com）登录后的 Cookie 粘贴进来（至少包含 a1=...; web_session=...），保存后重试'
+  }
+  const items = []
+  for (const link of links) {
+    try {
+      const { text, status, finalUrl } = await harvestGet(link, { cookie, timeoutMs: 20000 })
+      const ogTitle = (text.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i) || [])[1] || ''
+      const ogDesc = (text.match(/<meta[^>]+property=["']og:description["'][^>]+content=["']([^"']+)["']/i) || [])[1] || ''
+      const rawDesc = (text.match(/"desc"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1] || ''
+      let body = ogDesc || ''
+      if (rawDesc) {
+        try {
+          body = JSON.parse(`"${rawDesc}"`) || body
+        } catch {
+          /* 保留 og:description */
+        }
+      }
+      const title = ogTitle || '（未取到标题）'
+      if (status !== 200 || (!ogTitle && !ogDesc && !rawDesc)) {
+        items.push({
+          id: link, title: '无法抓取该笔记', text: '', author: '', metrics: '', lang: 'zh',
+          url: link, error: `HTTP ${status}：可能被风控或笔记已删除，确认链接与 Cookie 后重试`,
+        })
+      } else {
+        items.push({
+          id: finalUrl || link,
+          title,
+          text: toStr(body).slice(0, 8000),
+          author: (text.match(/"nickname"\s*:\s*"([^"]+)"/) || [])[1] || '小红书用户',
+          metrics: (text.match(/"liked_count"\s*:\s*"?(\w+)"?/) || [])[1]
+            ? `获赞 ${(text.match(/"liked_count"\s*:\s*"?(\w+)"?/) || [])[1]}`
+            : '',
+          lang: 'zh',
+          url: link,
+        })
+      }
+    } catch (e) {
+      items.push({
+        id: link, title: '抓取出错', text: '', author: '', metrics: '', lang: 'zh',
+        url: link, error: safeStr(e).slice(0, 120),
+      })
+    }
+  }
+  const okCount = items.filter(i => !i.error).length
+  return {
+    channel: 'xhs',
+    items,
+    note: `小红书抓取成功 ${okCount}/${links.length} 条（og/正文字段提取；被风控的链接会单独标注原因）。`,
+  }
+}
+
+// —— X（Twitter）：推文链接 → publish.twitter.com oEmbed（匿名可用，多语言正文）。
+//    query = 推文链接（每行或空格分隔，最多 limit 条）；关键词搜索需登录态暂不支持。
+async function harvestX({ query, limit }) {
+  const links = harvestExtractLinks(query).slice(0, limit)
+  if (!links.length) {
+    throw '请在输入框粘贴 X（Twitter）推文链接（每行一条，如 https://x.com/用户名/status/推文编号）；关键词搜索需登录态暂不支持'
+  }
+  const items = []
+  for (const link of links) {
+    try {
+      const u = `https://publish.twitter.com/oembed?url=${encodeURIComponent(link)}&omit_script=1&dnt=true`
+      const { text, status } = await harvestGet(u, { timeoutMs: 15000 })
+      if (status !== 200) {
+        items.push({
+          id: link, title: '无法抓取该推文', text: '', author: '', metrics: '', lang: 'en',
+          url: link, error: `oEmbed 返回 ${status}：推文可能已删除、受限或链接格式不对`,
+        })
+        continue
+      }
+      const d = JSON.parse(text) || {}
+      const html = toStr(d.html)
+      const pm = html.match(/<p[^>]*lang=["']([^"']+)["'][^>]*>([\s\S]*?)<\/p>/i)
+      const body = harvestStripHtml(pm ? pm[2] : html.replace(/<blockquote[^>]*>/i, '').split(/&mdash;|<\/blockquote>/)[0])
+      const handle = (toStr(d.author_url).match(/x\.com\/([^/]+)\/?$/i) || [])[1] || ''
+      const text2 = toStr(body).slice(0, 4000)
+      items.push({
+        id: toStr(d.url) || link,
+        title: text2.slice(0, 60) || toStr(d.author_name),
+        text: text2,
+        author: `${toStr(d.author_name)}${handle ? ' (@' + handle + ')' : ''}`,
+        metrics: '',
+        lang: (pm && pm[1]) || harvestLangOf(text2),
+        url: toStr(d.url) || link,
+      })
+    } catch (e) {
+      items.push({
+        id: link, title: '抓取出错', text: '', author: '', metrics: '', lang: 'en',
+        url: link, error: safeStr(e).slice(0, 120),
+      })
+    }
+  }
+  const okCount = items.filter(i => !i.error).length
+  return {
+    channel: 'x',
+    items,
+    note: `X 推文抓取成功 ${okCount}/${links.length} 条（oEmbed 匿名通道，原文语言自动识别）。`,
+  }
+}
+
+/** 渠道分发：一个渠道挂了只影响它自己 */
+async function fetchSourceChannel({ channel, query, cookie, limit }) {
+  if (channel === 'reddit') return harvestReddit({ query, limit })
+  if (channel === 'zhihu') return harvestZhihu({ query, limit, cookie })
+  if (channel === 'douyin') return harvestDouyin({ limit })
+  if (channel === 'xhs') return harvestXhs({ query, limit, cookie })
+  if (channel === 'x') return harvestX({ query, limit })
+  throw '未知渠道：' + channel
+}
+
 export const __test = { saveState, mirrorLibrary, ensureStateLibrary, newestSnapshotLibrary, applyLibraryGuard, pickLibrary, libraryHash, whitelistState, SYNC_STATE_FIELDS, ASSET_LIBRARY_KEY, ASSET_LIBRARY_SNAP_PREFIX, userKey,
   // v10.71：每日免费额度与计费口径（供单测用假 D1 验证）
   flushCreditUsage, freeUsedToday, bumpFreeUsage, freeQuota, creditsStatus, FREE_DAILY_LIMIT, costCnyOf, creditsOf, cnDay, BILLING_FREE_ALL, sanitizeObsRecord }
@@ -4043,6 +4421,28 @@ export default {
           dims[d] = toStr(parsed[d]) || '图中未体现此维度'
         }
         return ok(dims)
+      }
+
+      // —— v10.80 灵感采集：多渠道抓取（知乎 / 小红书 / 抖音 / Reddit / X）→
+      //    前端把勾选的条目组装成带来源链接的多语言语料，再走原有的「原文拆解」管线改编成书。
+      //    设计原则：
+      //    · 每个渠道一个 fetcher，互相隔离：一个渠道挂只影响它自己，返回结构统一 { channel, items, note }
+      //    · 每条 item 必带 url（来源链接）：改编成书后可溯源，这是本功能的硬性要求
+      //    · 需要登录态的渠道（知乎正文 / 小红书）由前端传 cookie，cookie 只用于本次抓取、
+      //      绝不写日志、绝不回显；失败时给「可操作」的指引文案而不是裸报错
+      //    · 抓取本身不消耗 DeepSeek token：不调 LLM，不进积分结算（多语言原文由拆解管线消化）
+      if (body.action === 'sourceFetch') {
+        const channel = toStr(body.channel)
+        const query = toStr(body.query).trim()
+        const cookie = toStr(body.cookie).trim()
+        const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 20)
+        if (!HARVEST_CHANNELS.includes(channel)) return err('未知渠道：' + (channel || '（空）'))
+        try {
+          const out = await fetchSourceChannel({ channel, query, cookie, limit })
+          return ok(out)
+        } catch (e) {
+          return err('抓取失败：' + safeStr(e))
+        }
       }
 
       // —— 工作台 1.5：用关键词/要求让 AI 辅助改写某个维度的一段内容 ——

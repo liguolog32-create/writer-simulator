@@ -239,6 +239,7 @@ const ACTION_LABEL: Record<string, string> = {
   anchorSuggest: '锚点建议',
   dissect: '原文拆解',
   imageDissect: '图片识别',
+  sourceFetch: '灵感采集',
   revise: '修改',
   continue: '续写',
   writeChapter: '章节精写',
