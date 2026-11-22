@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useApp } from '../store/AppContext'
 
 /* ============================================================
    文学审读 · 评判流程模板 v1.0
@@ -192,6 +193,9 @@ function stageLabel(k: StageKey) {
 }
 
 export function LiteraryAudit() {
+  const { state } = useApp()
+  /** 账号作品库：审读对象优先从这里选，避免手输书名和实际作品对不上 */
+  const books = state.library ?? []
   const [work, setWork] = useState('')
   const [version, setVersion] = useState('')
   const [contract, setContract] = useState('')
@@ -213,6 +217,22 @@ export function LiteraryAudit() {
   const totalChecks = CHECK_GROUPS.reduce((n, g) => n + g.items.length, 0)
 
   const toggle = (k: string) => setChecks(prev => ({ ...prev, [k]: !prev[k] }))
+
+  /** 从作品库选一本：自动带出书名，并按书的实际章数/字数把「版本范围」填好 */
+  const pickBook = (id: string) => {
+    const b = books.find(x => x.id === id)
+    if (!b) return
+    setWork(b.title)
+    const chapters = b.outline?.length || b.stats?.chapters || 0
+    const words = b.stats?.totalWords || 0
+    const written = Object.keys(b.chapterWritings ?? {}).length
+    const seg: string[] = []
+    if (chapters) seg.push(`共 ${chapters} 章`)
+    if (words) seg.push(`约 ${(words / 10000).toFixed(1)} 万字`)
+    if (written) seg.push(`已写正文 ${written} 章`)
+    if (seg.length) setVersion(seg.join(' · '))
+    setReport('')
+  }
 
   const loadSample = () => {
     setWork(SAMPLE.work)
@@ -352,10 +372,33 @@ export function LiteraryAudit() {
           <span className="la-h2-no">01</span>版本与阅读契约
         </h2>
         <div className="la-grid3">
-          <label className="la-field">
+          <div className="la-field">
             <span>作品名</span>
-            <input value={work} onChange={e => setWork(e.target.value)} placeholder="例：后台（全本）" />
-          </label>
+            <input
+              value={work}
+              onChange={e => setWork(e.target.value)}
+              placeholder="例：后台（全本）"
+              aria-label="作品名"
+            />
+            {books.length > 0 ? (
+              <select
+                className="la-bookpick"
+                value=""
+                onChange={e => pickBook(e.target.value)}
+                title="从账号作品库选择审读对象，会自动带出章数与字数"
+                aria-label="从作品库选择作品"
+              >
+                <option value="">从作品库选择（{books.length} 本）</option>
+                {books.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.title}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="la-hint-sm">作品库暂无作品，可直接手输书名</span>
+            )}
+          </div>
           <label className="la-field">
             <span>版本范围</span>
             <input value={version} onChange={e => setVersion(e.target.value)} placeholder="例：四卷 100 章 / PDF 575 页" />
@@ -509,7 +552,9 @@ const LA_CSS = `
 .la-flow-desc{margin:0;font-size:12px;color:var(--la-mute);line-height:1.6}
 .la-flow-arrow{flex:0 0 24px;text-align:center;color:#5f5e5a;font-size:18px}
 .la-note{margin:12px 0 0;padding:12px 16px;background:#232220;border-left:3px solid var(--la-accent);font-size:13px;color:var(--la-ink)}
-.la-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px}
+.la-grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;align-items:start}
+.la-bookpick{margin-top:2px;cursor:pointer}
+.la-hint-sm{font-size:11.5px;color:var(--la-mute);line-height:1.5}
 .la-grid2{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
 .la-field{display:flex;flex-direction:column;gap:6px;font-size:13px;color:var(--la-mute)}
 .la-field>span{font-weight:600;color:var(--la-ink)}
