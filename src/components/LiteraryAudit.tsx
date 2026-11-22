@@ -8,7 +8,7 @@ import { useApp } from '../store/AppContext'
    本组件自带样式，不依赖全局 CSS 改动。
    ============================================================ */
 
-type StageKey = 'r1' | 'r2' | 'r3' | 'other'
+type StageKey = 'r0' | 'r1' | 'r2' | 'r3' | 'other'
 type Level = '阻断' | '重大' | '一般'
 type Verdict = '通过' | '有条件通过' | '不通过'
 
@@ -22,27 +22,34 @@ const FLOW_STEPS: Array<{ no: string; name: string; sub: string; desc: string; c
   },
   {
     no: '02',
+    name: 'R0 叙事构成与节奏',
+    sub: '文本长什么样',
+    desc: '对白占比 · 段落结构 · 场景实感 · 动作密度 · 推进率 · 节奏变化',
+    color: '#f0a3c8',
+  },
+  {
+    no: '03',
     name: 'R1 因果与结构',
     sub: '故事能不能立住',
     desc: '目标 → 压力 → 选择 → 代价 → 后果；时间线 / 履历 / 账目 / 伏笔',
     color: '#f09595',
   },
   {
-    no: '03',
+    no: '04',
     name: 'R2 读者体验模拟',
     sub: '读者会不会往下读',
     desc: '续读点 · 跳读点 · 困惑点 · 不信点 · 情绪兑现',
     color: '#8ab4f8',
   },
   {
-    no: '04',
+    no: '05',
     name: 'R3 表达诊断',
     sub: '文字会不会劝退',
     desc: '声纹塌缩 · 重复问答 · 格言化对白 · 解释旁白 · 意象系统',
     color: '#5dcaa5',
   },
   {
-    no: '05',
+    no: '06',
     name: '综合判定与修订顺序',
     sub: '给结论，不给空话',
     desc: '通过 / 有条件通过 / 不通过 · 问题分级 · 保护原稿清单',
@@ -51,6 +58,20 @@ const FLOW_STEPS: Array<{ no: string; name: string; sub: string; desc: string; c
 ]
 
 const CHECK_GROUPS: Array<{ key: StageKey; title: string; hint: string; items: string[] }> = [
+  {
+    key: 'r0',
+    title: 'R0 · 叙事构成与节奏',
+    hint: '先测「文本长什么样」——这是小说还是对话速记。第 1–2 项可脚本量化，其余回到原文读。',
+    items: [
+      '对白占比：对白字数 ÷ 总字数。<45% 偏叙述，45–60% 均衡，>60% 只剩对话在动',
+      '短段占比：≤25 字段落 ÷ 总段落。>85% 意味着全书没有长段落，读感像聊天记录',
+      '连续短段串：连续 5 段以上全是单行对白 / 单句，是流水账高发区，需用动作 / 场景 / 心理打断',
+      '场景实感：每章至少一处「空间-时间-感官」落点（房间什么样、几点、什么味道）',
+      '动作密度：人物不能只「说」，还要有「做」（起身、停顿、转头、摸东西）',
+      '事件推进率：每章结尾人物处境 / 关系 / 目标有不可逆变化；没有的是「过场章」',
+      '节奏变化：长段与短段交替出现；连续快节奏后有没有「慢下来」的章',
+    ],
+  },
   {
     key: 'r1',
     title: 'R1 · 因果与结构',
@@ -116,6 +137,7 @@ const SAMPLE: {
   work: string
   version: string
   contract: string
+  r0: string
   r1: string
   r2: string
   r3: string
@@ -128,6 +150,8 @@ const SAMPLE: {
   version: '全本四卷 100 章 · PDF 575 页 · 含后记（终审稿）',
   contract:
     '体裁：直播电商行业现实主义 + 婚姻伦理。判定口径：全书级连续性与账目硬伤为零方可通过；仅作文本编辑判断，不涉及出版/市场价值。',
+  r0:
+    '实测：对白占比 52.8%（卷一 49.7% → 卷四 61.1%，越往后越靠对话推进）；短段（≤25 字）占比 91.0%，全书平均段长 11.7 字，每章约 182 段。诊断：问题不在「对话太多」（52.8% 在网文里属正常区间），而在「段落碎」——几乎没有长段落承载场景与动作，读感像聊天记录。修法不是删对话，而是把连续短段串合并、在长段落里补回空间 / 时间 / 物件与身体动作。',
   r1:
     '主线「起号—登顶—退位—结账」完整，人物目标与代价链清楚。终审不通过的根因是全书级连续性：补量时间与总量冲突、江野履历重置、离婚状态冲突、对赌与和解金额（2000 万 / 2400 万）冲突、核心经营数字冲突、监控与电梯细节矛盾。',
   r2:
@@ -135,6 +159,15 @@ const SAMPLE: {
   r3:
     '高度模板化：抽样统计「没有说话」约 234 处、「嗯。」约 466 处、「我知道。」约 201 处、「为什么」起句约 207 处、「看了很久」约 57 处。主要人物声纹互相置换仍成立，需做声纹精修。',
   issues: [
+    {
+      id: 's0',
+      stage: 'r0',
+      level: '重大',
+      place: '全书，卷四最集中',
+      problem: '段落碎、无长段落承载场景与动作，读感像对话速记',
+      evidence: '短段（≤25 字）占比 91.0%，平均段长 11.7 字，每章约 182 段；卷四对白占比 61.1%',
+      fix: '把连续 5 段以上的单行对白合并、穿插身体动作与环境落点；为每章补一处「空间-时间-感官」场景锚点',
+    },
     {
       id: 's1',
       stage: 'r1',
@@ -189,7 +222,15 @@ const SAMPLE: {
 }
 
 function stageLabel(k: StageKey) {
-  return k === 'r1' ? 'R1 因果结构' : k === 'r2' ? 'R2 读者体验' : k === 'r3' ? 'R3 表达诊断' : '其他'
+  return k === 'r0'
+    ? 'R0 叙事构成'
+    : k === 'r1'
+      ? 'R1 因果结构'
+      : k === 'r2'
+        ? 'R2 读者体验'
+        : k === 'r3'
+          ? 'R3 表达诊断'
+          : '其他'
 }
 
 export function LiteraryAudit() {
@@ -200,6 +241,7 @@ export function LiteraryAudit() {
   const [version, setVersion] = useState('')
   const [contract, setContract] = useState('')
   const [checks, setChecks] = useState<Record<string, boolean>>({})
+  const [r0, setR0] = useState('')
   const [r1, setR1] = useState('')
   const [r2, setR2] = useState('')
   const [r3, setR3] = useState('')
@@ -238,6 +280,7 @@ export function LiteraryAudit() {
     setWork(SAMPLE.work)
     setVersion(SAMPLE.version)
     setContract(SAMPLE.contract)
+    setR0(SAMPLE.r0)
     setR1(SAMPLE.r1)
     setR2(SAMPLE.r2)
     setR3(SAMPLE.r3)
@@ -254,6 +297,7 @@ export function LiteraryAudit() {
     setVersion('')
     setContract('')
     setChecks({})
+    setR0('')
     setR1('')
     setR2('')
     setR3('')
@@ -276,16 +320,19 @@ export function LiteraryAudit() {
     lines.push(`- 阅读契约：${contract.trim() || '（未填写）'}`)
     lines.push(`- 检查项完成：${checkedCount} / ${totalChecks}`)
     lines.push('')
-    lines.push('## 02 R1 · 因果与结构')
+    lines.push('## 02 R0 · 叙事构成与节奏')
+    lines.push(r0.trim() || '（未填写）')
+    lines.push('')
+    lines.push('## 03 R1 · 因果与结构')
     lines.push(r1.trim() || '（未填写）')
     lines.push('')
-    lines.push('## 03 R2 · 读者体验模拟')
+    lines.push('## 04 R2 · 读者体验模拟')
     lines.push(r2.trim() || '（未填写）')
     lines.push('')
-    lines.push('## 04 R3 · 表达诊断')
+    lines.push('## 05 R3 · 表达诊断')
     lines.push(r3.trim() || '（未填写）')
     lines.push('')
-    lines.push('## 05 问题清单（按级别排序）')
+    lines.push('## 06 问题清单（按级别排序）')
     if (!issues.length) {
       lines.push('（暂无记录）')
     } else {
@@ -331,9 +378,9 @@ export function LiteraryAudit() {
 
       <header className="la-hero">
         <p className="la-eyebrow">观澜书房 · 文学审读</p>
-        <h1 className="la-title">把「好小说」拆成可复核的五步</h1>
+        <h1 className="la-title">把「好小说」拆成可复核的六步</h1>
         <p className="la-sub">
-          这不是打分表，是一条审读流水线：先锁定版本契约，再依次过因果、读者体验、表达三层，最后给判定和修订顺序。每一条结论都要能回到原文证据。
+          这不是打分表，是一条审读流水线：先锁定版本契约，再测文本长什么样（叙事构成与节奏），然后依次过因果、读者体验、表达三层，最后给判定和修订顺序。每一条结论都要能回到原文证据。
         </p>
         <div className="la-hero-actions">
           <button className="la-btn primary" onClick={loadSample}>
@@ -363,7 +410,7 @@ export function LiteraryAudit() {
           ))}
         </div>
         <p className="la-note">
-          判定规则：R1 不过（存在全书级连续性硬伤）→ 直接「不通过」，先修账目与时间线；R1 过而 R2/R3 有局部问题 → 「有条件通过」；三层均无明显硬伤 → 「通过」。
+          判定规则：R0 失衡（段落碎到没有长段落 / 对白占比超 60%）→ 至少「有条件通过」，先补场景与动作；R1 不过（存在全书级连续性硬伤）→ 直接「不通过」，先修账目与时间线；R1 过而 R0/R2/R3 有局部问题 → 「有条件通过」；四层均无明显硬伤 → 「通过」。
         </p>
       </section>
 
@@ -420,7 +467,7 @@ export function LiteraryAudit() {
 
       <section className="la-section">
         <h2 className="la-h2">
-          <span className="la-h2-no">02–04</span>三层检查清单
+          <span className="la-h2-no">02–05</span>四层检查清单
           <span className="la-progress">{checkedCount} / {totalChecks}</span>
         </h2>
         <div className="la-check-grid">
@@ -444,7 +491,11 @@ export function LiteraryAudit() {
             </div>
           ))}
         </div>
-        <div className="la-grid3 la-findings">
+        <div className="la-grid2 la-findings">
+          <label className="la-field">
+            <span>R0 结论</span>
+            <textarea rows={5} value={r0} onChange={e => setR0(e.target.value)} placeholder="对白占比 / 段落结构 / 连续短段串 / 场景实感 / 动作密度 / 推进率 / 节奏变化" />
+          </label>
           <label className="la-field">
             <span>R1 结论</span>
             <textarea rows={5} value={r1} onChange={e => setR1(e.target.value)} placeholder="因果链是否成立；时间线 / 履历 / 账目 / 伏笔的具体冲突" />
@@ -461,7 +512,7 @@ export function LiteraryAudit() {
       </section>
 
       <section className="la-section">
-        <h2 className="la-h2"><span className="la-h2-no">05</span>问题清单</h2>
+        <h2 className="la-h2"><span className="la-h2-no">06</span>问题清单</h2>
         <p className="la-section-note">每条问题必须落到「位置 + 证据 + 建议」，否则不算审读结论。</p>
         <div className="la-issues">
           {issues.map((it, idx) => (
@@ -472,6 +523,7 @@ export function LiteraryAudit() {
                   {LEVEL_ORDER.map(l => <option key={l}>{l}</option>)}
                 </select>
                 <select value={it.stage} onChange={e => updateIssue(it.id, { stage: e.target.value as StageKey })}>
+                  <option value="r0">R0 叙事构成</option>
                   <option value="r1">R1 因果结构</option>
                   <option value="r2">R2 读者体验</option>
                   <option value="r3">R3 表达诊断</option>
@@ -561,7 +613,7 @@ const LA_CSS = `
 .la-root input,.la-root textarea,.la-root select{width:100%;border:1px solid var(--border,rgba(255,255,255,.10));background:#232220;border-radius:6px;padding:9px 11px;color:var(--la-ink);font-family:inherit;font-size:13px;outline:none}
 .la-root input:focus,.la-root textarea:focus,.la-root select:focus{border-color:var(--la-accent);box-shadow:0 0 0 2px rgba(240,149,149,.10)}
 .la-root textarea{resize:vertical;line-height:1.65}
-.la-check-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:16px}
+.la-check-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:16px}
 .la-check-card{background:#232220;border:1px solid var(--la-line);border-radius:6px;padding:16px}
 .la-check-card h3{margin:0 0 6px;font-size:15px;color:#e8e6dc}
 .la-check-hint{margin:0 0 12px;font-size:12px;color:var(--la-mute);line-height:1.6}

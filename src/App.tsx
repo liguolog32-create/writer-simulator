@@ -323,7 +323,7 @@ function AppShell() {
               {view === 'brain'
                 ? '脑洞快速造框架 · 零结构思维也能写'
                 : view === 'audit'
-                  ? '五步评判流程 · R1 因果 / R2 读者 / R3 表达 · 生成审读报告'
+                  ? '六步评判流程 · R0 叙事 / R1 因果 / R2 读者 / R3 表达 · 生成审读报告'
                   : '多画布并行编辑 · 原文拆解 · 修改续写'}
             </p>
           </div>
@@ -347,7 +347,7 @@ function AppShell() {
           <button
             className={`ghost-btn ${view === 'audit' ? 'on' : ''}`}
             onClick={() => setView('audit')}
-            title="文学审读：按版本契约 → R1 → R2 → R3 → 综合判定审读整本小说"
+            title="文学审读：按版本契约 → R0 叙事构成 → R1 因果 → R2 读者 → R3 表达 → 综合判定"
           >
             <Icon name="book" /> 文学审读
           </button>

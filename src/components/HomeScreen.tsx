@@ -96,8 +96,8 @@ export function HomeScreen({
             <span className="hp-no">04</span>
             <span className="hp-main">
               <span className="hp-name">用评判流程审读整本小说</span>
-              <span className="hp-desc">按版本契约 → R1 因果 → R2 读者 → R3 表达 → 综合判定，逐条落到原文证据</span>
-              <span className="hp-meta">五步流程 · 三层诊断 · 问题分级 · 保护原稿 · 一键生成报告</span>
+              <span className="hp-desc">按版本契约 → R0 叙事构成 → R1 因果 → R2 读者 → R3 表达 → 综合判定，逐条落到原文证据</span>
+              <span className="hp-meta">六步流程 · 四层诊断 · 对白与段落可量化 · 问题分级 · 一键生成报告</span>
             </span>
             <span className="hp-arrow" aria-hidden="true">→</span>
           </button>
