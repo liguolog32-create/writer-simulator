@@ -6,7 +6,13 @@ import type { EntryMode } from '../types'
    —— 大字标题 + 眉标分组 + 编号索引行 + hover 微交互；全程不用 emoji
    ============================================================ */
 
-export function HomeScreen({ onPick }: { onPick: (mode: EntryMode) => void }) {
+export function HomeScreen({
+  onPick,
+  onOpenAudit,
+}: {
+  onPick: (mode: EntryMode) => void
+  onOpenAudit: () => void
+}) {
   const { state, setRememberMode, platformSettings } = useApp()
 
   const pick = (mode: EntryMode) => {
@@ -80,6 +86,21 @@ export function HomeScreen({ onPick }: { onPick: (mode: EntryMode) => void }) {
             世界观创作<span className="hp-label-line" aria-hidden="true" />
           </p>
           <Row row={rows[2]} onPick={pick} />
+        </section>
+
+        <section className="hp-group">
+          <p className="hp-label">
+            稿件审读<span className="hp-label-line" aria-hidden="true" />
+          </p>
+          <button className="hp-row tone-gold" onClick={onOpenAudit}>
+            <span className="hp-no">04</span>
+            <span className="hp-main">
+              <span className="hp-name">用评判流程审读整本小说</span>
+              <span className="hp-desc">按版本契约 → R1 因果 → R2 读者 → R3 表达 → 综合判定，逐条落到原文证据</span>
+              <span className="hp-meta">五步流程 · 三层诊断 · 问题分级 · 保护原稿 · 一键生成报告</span>
+            </span>
+            <span className="hp-arrow" aria-hidden="true">→</span>
+          </button>
         </section>
       </nav>
 

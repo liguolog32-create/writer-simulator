@@ -14,6 +14,7 @@ import { BookGenerateBanner } from './components/BookGenerator'
 import { BookShelf } from './components/BookShelf'
 import { Workbench } from './components/Workbench'
 import { HomeScreen } from './components/HomeScreen'
+import { LiteraryAudit } from './components/LiteraryAudit'
 import { BrainFlow } from './components/BrainFlow'
 import { HealthPanel } from './components/HealthPanel'
 import { CloudBadge } from './components/CloudBadge'
@@ -25,7 +26,7 @@ import type { EntryMode } from './types'
 import { IS_STAGING } from './config'
 
 /** PRD 2.2 产品页面路由：/ 首页分流页、/novel-brain 脑洞共创页、/ 原有工作台（高级模式） */
-type View = 'home' | 'brain' | 'pro' | 'library' | 'bot'
+type View = 'home' | 'brain' | 'pro' | 'library' | 'bot' | 'audit'
 
 const HASH: Record<View, string> = {
   home: '#/',
@@ -34,6 +35,8 @@ const HASH: Record<View, string> = {
   library: '#/library',
   // v10.65：机器人「观澜」独立页面（人格 + 识海 + 屏幕被动观察）
   bot: '#/bot',
+  // 文学审读：五步评判流程 + R1/R2/R3 诊断 + 报告生成
+  audit: '#/literary-audit',
 }
 
 function viewFromHash(): View {
@@ -43,6 +46,7 @@ function viewFromHash(): View {
   // v10.42 LIB-01：作品库从弹窗改成独立页面，可直接用 URL 打开
   if (h.startsWith('#/library')) return 'library'
   if (h.startsWith('#/bot')) return 'bot'
+  if (h.startsWith('#/literary-audit')) return 'audit'
   return 'home'
 }
 
@@ -318,7 +322,9 @@ function AppShell() {
             <p className="brand-sub">
               {view === 'brain'
                 ? '脑洞快速造框架 · 零结构思维也能写'
-                : '多画布并行编辑 · 原文拆解 · 修改续写'}
+                : view === 'audit'
+                  ? '五步评判流程 · R1 因果 / R2 读者 / R3 表达 · 生成审读报告'
+                  : '多画布并行编辑 · 原文拆解 · 修改续写'}
             </p>
           </div>
         </div>
@@ -336,6 +342,14 @@ function AppShell() {
             title="机器人：它有自己的人格和三观，替你写东西"
           >
             <Icon name="gem" /> 机器人
+          </button>
+          {/* 文学审读：把评判流程模板做成可操作页面，入口常驻顶栏 */}
+          <button
+            className={`ghost-btn ${view === 'audit' ? 'on' : ''}`}
+            onClick={() => setView('audit')}
+            title="文学审读：按版本契约 → R1 → R2 → R3 → 综合判定审读整本小说"
+          >
+            <Icon name="book" /> 文学审读
           </button>
           {/* v10.15 已下线顶栏的「📖 生成文本」：
               它和「📚 作品库」并排挤在右上角，新手分不清谁是谁，还容易误点后干等。
@@ -366,6 +380,7 @@ function AppShell() {
             if (m === 'worldview') setCanvasTab('worldview')
             enter(m, m === 'brain' ? 'brain' : 'pro')
           }}
+          onOpenAudit={() => setView('audit')}
         />
       </div>
 
@@ -382,6 +397,11 @@ function AppShell() {
       {/* v10.65：机器人页（人格卡 + 识海 + 屏幕被动观察）。同样保持挂载，只切可见性 */}
       <div className="view-host" hidden={view !== 'bot'}>
         <RobotPage />
+      </div>
+
+      {/* 文学审读页：五步评判流程 + R1/R2/R3 检查清单 + 报告生成 */}
+      <div className="view-host" hidden={view !== 'audit'}>
+        <LiteraryAudit />
       </div>
 
       <div className="view-host" hidden={view !== 'brain'}>
