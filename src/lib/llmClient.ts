@@ -491,6 +491,50 @@ export interface ScriptResult {
   episodes: ScriptEpisode[]
   prompts: Array<{ scene: string; prompt: string }>
   notes: string[]
+  settings: { episodes: number; secPerEp: number; platform: string; rangeStart?: number; rangeEnd?: number; isBatch?: boolean }
+}
+
+/** v18.8：联网匹配出的短剧规格 */
+export interface ScriptSpec {
+  episodes: number
+  secPerEp: number
+  words: number
+  wordsPerEp: number
+  sourceWords: number
+  platform: string
+  basis: string
+  spec: {
+    secRange: number[]
+    epRange: number[]
+    longRunRange: number[]
+    wordsRange: number[]
+    hookSec: number
+    conflictSec: number
+    acts: string[]
+  }
+  reference: string
+  market: { sources: Array<{ name: string; episodes: string; sec: string; words: string }>; advice: string }
+}
+
+/** v18.8：全本分集大纲中的一集（只有纲要，没有完整正文） */
+export interface ScriptOutlineEpisode {
+  index: number
+  title: string
+  hook: string
+  conflict: string
+  twist: string
+  cliffhanger: string
+  act: string
+  durationSec: number
+}
+
+export interface ScriptOutline {
+  title: string
+  genre: string
+  logline: string
+  acts: Array<{ act: string; from: number; to: number; goal: string }>
+  episodes: ScriptOutlineEpisode[]
+  notes: string[]
   settings: { episodes: number; secPerEp: number; platform: string }
 }
 
@@ -522,8 +566,256 @@ export function toScriptLLM(input: {
   secPerEp?: number
   platform?: string
   styleNote?: string
+  /** v18.8：分批写正文时传区间与全本大纲 */
+  rangeStart?: number
+  batchSize?: number
+  outline?: ScriptOutlineEpisode[]
 }) {
-  return callLLM<ScriptResult>({ action: 'toScript', ...input }, 180000)
+  return callLLM<ScriptResult>({ action: 'toScript', ...input }, 300000)
+}
+
+/** v18.8：联网检索网络短剧剧本规格，按原文字数匹配集数×单集时长 */
+export function scriptSpecLLM(input: {
+  text: string
+  platform?: string
+  preferEpisodes?: number
+  words?: number
+}) {
+  return callLLM<ScriptSpec>({ action: 'scriptSpec', ...input }, 120000)
+}
+
+/** v18.8：一次生成全本 100-250 集分集大纲 */
+export function scriptOutlineLLM(input: {
+  text: string
+  canvases?: Record<string, string>
+  episodes: number
+  secPerEp: number
+  platform?: string
+  styleNote?: string
+}) {
+  return callLLM<ScriptOutline>({ action: 'scriptOutline', ...input }, 300000)
+}
+
+/* ============================================================
+   drama-skills 能力迁移（后端类型层）
+   ------------------------------------------------------------
+   来源：drama-skills (MIT, zenstory-ai/drama-skills contributors)
+   迁移日期：2026-11-25
+   与 worker.js 的 7 个新 action 一一对应，字段与后端归一化输出对齐。
+   ============================================================ */
+
+/** 原著快评中的一章 / 一段 */
+export interface NovelAnalyzeChapter {
+  no: number
+  title: string
+  summary: string
+  characters: string[]
+  hooks: string[]
+}
+
+/** 原著快评：抽样快评结果 */
+export interface ScriptNovelAnalyze {
+  title: string
+  logline: string
+  genre: string
+  tags: string[]
+  chapters: NovelAnalyzeChapter[]
+  rhythm: { acts: Array<{ act: string; from: number; to: number; goal: string }>; pacingNote: string }
+  adaptationTips: string[]
+  sources?: Array<{ name: string; url?: string }>
+}
+
+/** 改编方案中的一集执行计划 */
+export interface DevelopEpisodePlan {
+  index: number
+  title: string
+  goal: string
+  keyEvents: string[]
+  cliffhanger: string
+}
+
+/** 改编方案 / 导演阐述 */
+export interface ScriptDevelop {
+  title: string
+  genre: string
+  logline: string
+  coreConflict: string
+  adaptationApproach: string
+  directorStatement: string
+  hookHandbook: Array<{ type: string; technique: string; example: string }>
+  episodePlans: DevelopEpisodePlan[]
+  continuityRules: string[]
+}
+
+/** 视觉设定：人物某一可变阶段 */
+export interface AssetVariant {
+  name: string
+  appearance: string
+  episodes: string
+}
+
+/** 视觉设定：一个角色的完整设定 */
+export interface AssetCharacter {
+  name: string
+  /** 跨场不变的外貌 */
+  appearance: string
+  variants: AssetVariant[]
+  /** 有发声台词时非空 */
+  voice: string
+  voiceRef: string
+  lockWords: string[]
+  /** 生图提示词锚点 */
+  promptName: string
+}
+
+/** 视觉设定 */
+export interface ScriptAssets {
+  productionStyle: string
+  eraSetting: string
+  characters: AssetCharacter[]
+  locations: Array<{ name: string; appearance: string; orientation: string }>
+  props: Array<{ name: string; appearance: string; states: Array<{ state: string; from: string; to: string }> }>
+  continuityLocks: Array<{ id: string; label: string; scope: string; lockWords: string[] }>
+}
+
+/** 分镜中的一镜（含首尾帧） */
+export interface StoryboardShot {
+  id: string
+  episode: number
+  sceneNo: number
+  shotType: string
+  camera: string
+  movement: string
+  startFrame: string
+  action: string
+  endFrame: string
+  sound: string
+  blocking: string
+  firstFramePrompt: string
+  lastFramePrompt: string
+  refImages: string[]
+  durationSec: number
+}
+
+/** 分镜 / 首尾帧 */
+export interface ScriptStoryboard {
+  shots: StoryboardShot[]
+  uncoveredScenes: string[]
+  summary: string
+}
+
+/** 视频提示词中的单镜 */
+export interface VideoPromptShot {
+  shotId: string
+  prompt: string
+  action: string
+  movement: string
+  camera: string
+  sound: string
+  continuityRefs: string[]
+  durationSec: number
+}
+
+/** 视频提示词（含 GROUP-* 多镜合生与配乐表） */
+export interface ScriptVideoPrompts {
+  shots: VideoPromptShot[]
+  groups: Array<{ id: string; shotIds: string[]; prompt: string }>
+  musicPlan: Array<{ episode: number; mood: string; description: string }>
+}
+
+export type ReviewSeverity = 'high' | 'medium' | 'low'
+export interface ReviewIssue {
+  issue: string
+  severity: ReviewSeverity
+  suggestion: string
+}
+
+/** 结构 / 剧情 / 连戏审查 */
+export interface ScriptReview {
+  score: number
+  structural: ReviewIssue[]
+  plot: ReviewIssue[]
+  continuity: ReviewIssue[]
+  strengths: string[]
+  verdict: string
+}
+
+/** 对标拆解中的一个 beats */
+export interface BreakdownBeat {
+  position: string
+  type: string
+  description: string
+}
+
+/** 对标拆解。缺失字段后端写「暂无」，故时长类为 number | string */
+export interface ScriptBreakdown {
+  avgEpisodeSec: number | string
+  avgShotSec: number | string
+  dialogueDensity: string
+  openingPattern: string
+  endingPattern: string
+  beats: BreakdownBeat[]
+  gaps: string[]
+  reverseOutline: Array<{ index: number; title: string; summary: string }>
+}
+
+/** 上一步结果：归一化对象，或前端序列化后的 JSON 字符串（worker 端会解回） */
+type DramaStageObject = object | string
+
+/** 原著快评 */
+export function scriptNovelAnalyzeLLM(input: { text: string; platform?: string }) {
+  return callLLM<ScriptNovelAnalyze>({ action: 'scriptNovelAnalyze', ...input }, 300000)
+}
+
+/** 改编方案 / 导演阐述 */
+export function scriptDevelopLLM(input: {
+  text: string
+  canvases?: Record<string, string>
+  episodes: number
+  secPerEp: number
+  platform?: string
+  outline?: object[]
+  styleNote?: string
+}) {
+  return callLLM<ScriptDevelop>({ action: 'scriptDevelop', ...input }, 300000)
+}
+
+/** 视觉设定 */
+export function scriptAssetsLLM(input: { script: DramaStageObject; styleNote?: string }) {
+  return callLLM<ScriptAssets>({ action: 'scriptAssets', ...input }, 300000)
+}
+
+/** 分镜 / 首尾帧 */
+export function scriptStoryboardLLM(input: {
+  script: DramaStageObject
+  assets?: DramaStageObject
+  styleNote?: string
+}) {
+  return callLLM<ScriptStoryboard>({ action: 'scriptStoryboard', ...input }, 300000)
+}
+
+/** 视频提示词（不生成媒体） */
+export function scriptVideoPromptsLLM(input: {
+  storyboard: DramaStageObject
+  assets?: DramaStageObject
+  styleNote?: string
+}) {
+  return callLLM<ScriptVideoPrompts>({ action: 'scriptVideoPrompts', ...input }, 300000)
+}
+
+/** 结构 / 剧情 / 连戏审查 */
+export function scriptReviewLLM(input: {
+  script?: DramaStageObject
+  assets?: DramaStageObject
+  storyboard?: DramaStageObject
+  videoPrompts?: DramaStageObject
+}) {
+  return callLLM<ScriptReview>({ action: 'scriptReview', ...input }, 300000)
+}
+
+/** 对标拆解 */
+export function scriptBreakdownLLM(input: { text: string; platform?: string }) {
+  return callLLM<ScriptBreakdown>({ action: 'scriptBreakdown', ...input }, 300000)
 }
 
 /* ============================================================

@@ -919,7 +919,123 @@ async function calibrateDirection(env, { brief, text }) {
    v10.10 新增一：AI 短剧剧本改写
    把已生成的小说正文改写成「能直接拍的竖屏短剧剧本」：
    分集 + 场景 + 台词 + 镜头 + 每集钩子 + AI 生视频提示词
+
+   v18.8 规格基准：2025-2026 网络短剧行业公开规格（多个来源交叉核对）
+   - 竖屏短剧：单集 1-2 分钟 / 550-800 字；3 秒钩子、30 秒冲突、结尾留悬念
+   - 整体闭环：主流 60-100 集，长线 100-250 集；六幕式（起-困-反-升-爽-合）
+   - 平台差异：抖音/红果 1-2 分钟；快手/爱奇艺/芒果 1-3 分钟；
+     腾讯/优酷横屏中短剧 10-15 分钟（本次只做竖屏，横屏另计）
+   - 海外翻拍（ReelShort/DramaBox）：60-80 集 / 每集 1-2 分钟 / 剧本 100 余页
+   数据用于「原文 → 集数×单集时长」的匹配，不写死在提示词里。
    ============================================================ */
+const SCRIPT_SPEC_BASE = {
+  vertical: {
+    sec: [60, 120],
+    words: [550, 800],
+    episodes: [60, 100],
+    longRun: [100, 250],
+    hookSec: 3,
+    conflictSec: 30,
+    acts: ['起', '困', '反', '升', '爽', '合'],
+  },
+  platform: {
+    '抖音': { sec: [60, 120], episodes: [60, 100] },
+    '红果短剧': { sec: [60, 120], episodes: [60, 100] },
+    '快手': { sec: [60, 180], episodes: [60, 120] },
+    '微信短剧': { sec: [60, 120], episodes: [60, 120] },
+    '番茄短剧': { sec: [60, 120], episodes: [60, 100] },
+    '通用': { sec: [60, 120], episodes: [60, 100] },
+  },
+}
+
+/** 按原文字数 + 平台 + 用户想要的集数，算出匹配的集数×单集时长。纯计算，不联网。 */
+function matchScriptSpec({ words, platform, preferEpisodes }) {
+  const p = SCRIPT_SPEC_BASE.platform[platform] || SCRIPT_SPEC_BASE.platform['通用']
+  const [minSec, maxSec] = p.sec
+  const [minEp, maxEp] = p.episodes
+  const [longMin, longMax] = SCRIPT_SPEC_BASE.vertical.longRun
+  const [wordsMin, wordsMax] = SCRIPT_SPEC_BASE.vertical.words
+
+  // 一部剧的正文体量 = 集数 × 单集字数（取行业区间中值 675 字）
+  const wordsPerEp = Math.round((wordsMin + wordsMax) / 2)
+  const naturalEp = Math.max(1, Math.round(words / wordsPerEp))
+
+  let episodes, secPerEp, basis
+  if (preferEpisodes && Number(preferEpisodes) > 0) {
+    // 用户指定集数：优先尊重，按时长兜底换算
+    episodes = Math.round(Number(preferEpisodes))
+    secPerEp = Math.round((words / Math.max(episodes, 1)) / 4.2)  // 每秒约 4.2 字
+    secPerEp = Math.max(30, Math.min(600, secPerEp))
+    basis = '按你指定的集数反推单集时长'
+  } else {
+    // 自动：先落在平台主流区间；原文很长时自动升到长线剧 100-250 集
+    if (naturalEp <= maxEp) {
+      episodes = Math.max(minEp, naturalEp)
+      secPerEp = Math.round((words / episodes) / 4.2)
+      secPerEp = Math.max(minSec, Math.min(maxSec, secPerEp))
+      basis = `原文 ${words} 字 ÷ 每集约 ${wordsPerEp} 字，落在平台主流 ${minEp}-${maxEp} 集区间`
+    } else {
+      episodes = Math.min(longMax, Math.max(longMin, naturalEp))
+      secPerEp = Math.round((words / episodes) / 4.2)
+      secPerEp = Math.max(minSec, Math.min(maxSec, secPerEp))
+      basis = `原文 ${words} 字 ÷ 每集约 ${wordsPerEp} 字，超过主流区间，升为 ${longMin}-${longMax} 集长线剧`
+    }
+  }
+
+  return {
+    episodes,
+    secPerEp,
+    words,
+    wordsPerEp,
+    sourceWords: words,
+    platform,
+    basis,
+    spec: {
+      secRange: p.sec,
+      epRange: [minEp, maxEp],
+      longRunRange: [longMin, longMax],
+      wordsRange: [wordsMin, wordsMax],
+      hookSec: SCRIPT_SPEC_BASE.vertical.hookSec,
+      conflictSec: SCRIPT_SPEC_BASE.vertical.conflictSec,
+      acts: SCRIPT_SPEC_BASE.vertical.acts,
+    },
+    reference: '2025-2026 短剧行业公开规格（微信《短剧编辑和短剧制作人审核剧本要求》、红星新闻《中式短剧风靡世界》：竖屏 1-2 分钟/550-800 字，主流 60-100 集，长线 100-250 集，3 秒钩子/30 秒冲突/六幕式）',
+  }
+}
+
+/* ============================================================
+   v18.8 新增：全本分集大纲（100-250 集一次出齐，只出纲要不出正文）
+   ============================================================ */
+const SCRIPT_OUTLINE_SYSTEM = `你是短剧分集大纲编剧。用户给你一段小说原文和一份行业规格，
+你要把整部小说拆成**指定集数的分集大纲**——每集只要标题、钩子、冲突、反转、结尾悬念，不写完整台词和场景。
+
+【输出要求】
+1. episodes 数组长度必须正好等于用户要求的集数，index 从 1 连续编号到 N。
+2. 每集给 5 个字段，每个字段一句话、不超过 30 字：
+   - title：本集标题（≤10 字，不带「第X集」）
+   - hook：开头 3 秒钩子（画面 + 一句话）
+   - conflict：本集核心冲突（谁和谁、为什么）
+   - twist：本集反转（信息差揭开或局势倒转）
+   - cliffhanger：结尾悬念，让人非看下一集不可
+3. 整体按六幕式分配：起(1-10%)、困(10-30%)、反(30-50%)、升(50-70%)、爽(70-90%)、合(90-100%)。
+   在 act 字段标出本集属于哪一幕（只能用 起/困/反/升/爽/合 六个字之一）。
+4. durationSec 每集都填用户给的单集秒数。
+5. 忠于原作：不要发明新主线，长篇可以压缩支线、合并人物，但结局走向要一致。
+6. 每 5 集至少有一个大转折；开篇 3 集内必须有主线冲突。
+
+【严格返回 JSON】不要 markdown 包裹，不要解释：
+{
+  "title": "剧名（≤14字）",
+  "genre": "类型",
+  "logline": "一句话卖点（≤30字）",
+  "acts": [{"act":"起","from":1,"to":10,"goal":"这一幕要完成什么"}],
+  "episodes": [
+    {"index":1,"title":"","hook":"","conflict":"","twist":"","cliffhanger":"","act":"起","durationSec":90}
+  ],
+  "notes": ["改编取舍说明，每条≤40字"]
+}
+注意：集数很多时优先保证 episodes 条数齐全，每条文字宁短勿长。`
+
 const SCRIPT_SYSTEM = `你是「短剧编剧 + AI 影片导演」二合一。用户会给你一段自己写好的小说正文（可能很长），
 你要把它改写成一部**符合短剧行业交付格式、可以直接开拍的竖屏 AI 短剧剧本**。
 
@@ -1024,6 +1140,235 @@ const SCRIPT_SYSTEM = `你是「短剧编剧 + AI 影片导演」二合一。用
 - prompts 条数在 集数×2 到 集数×4 之间，挑最有画面的场景
 - 所有值都是字符串或数组，不要用嵌套对象以外的结构
 - 用户没给集数就按 3 集写，每集 90 秒`
+
+/* ============================================================
+   短剧能力迁移（二）：原著快评 / 改编方案 / 视觉设定 / 分镜 / 视频提示词 / 审查 / 对标拆解
+   ------------------------------------------------------------
+   来源与许可：drama-skills (MIT, zenstory-ai/drama-skills contributors)
+   迁移日期：2026-11-25
+   以下 7 个 SYSTEM prompt 依据 drama-skills 的 SKILL.md 规则迁移；
+   每个 prompt 都强制「只输出严格 JSON、不要解释、不要 markdown 代码块」。
+   本脚本只做文本编排，不生成图片/视频等媒体。
+   ============================================================ */
+
+// —— 归一化 helper（顶层，不进 fetch；项目历史坑：塞进 fetch 会被每次请求重复定义）——
+const dStr = (v, max = 400) => toStr(v).trim().slice(0, max)
+const dList = (v, n = 20, max = 300) =>
+  (Array.isArray(v) ? v : []).map(x => dStr(x, max)).filter(Boolean).slice(0, n)
+const dNum = (v, def = 0) => {
+  const n = Number(v)
+  return Number.isFinite(n) ? n : def
+}
+const dSeverity = v => {
+  const s = toStr(v).trim().toLowerCase()
+  return s === 'high' || s === 'low' ? s : 'medium'
+}
+const dNumOrNA = (v, fallback = '暂无') => {
+  if (v == null || v === '') return fallback
+  const n = Number(v)
+  return Number.isFinite(n) ? n : dStr(v, 60) || fallback
+}
+// 前端可能把上一步结果序列化成字符串传回来，这里统一解回对象
+const dParse = (v, limit = 60000) => {
+  if (v && typeof v === 'object') return v
+  const s = toStr(v).trim().slice(0, limit)
+  if (!s) return {}
+  try {
+    const p = JSON.parse(s)
+    return p && typeof p === 'object' ? p : {}
+  } catch {
+    return {}
+  }
+}
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   原著快评：抽样快评而非全文精读；标章节索引、脉络节奏与分集潜力点，不编造原文没有的精确设定。 */
+const SCRIPT_NOVEL_ANALYZE_SYSTEM = `你是短剧「原著快评员」。用户给你一段小说原文（可能是节选），你要做抽样快评，不是全文精读。
+
+【工作方法】
+1. 抽样：按章节 / 段落抽样。chapters[].no 用原文章节序号；原文无编号就按出现顺序从 1 编号。
+2. chapters[].summary 一句话（≤40 字）；characters / hooks 只抽原文明确出现的人和钩子，没有就给空数组。
+3. rhythm.acts 按 起/承/转/合 切成最多 6 幕，from / to 填章节或段落序号，goal 一句话；pacingNote 说明哪里快、哪里慢。
+4. adaptationTips 只写「哪段可做集尾悬念 / 哪段要压缩 / 哪段是分集潜力点」，不替用户做创作决定。
+5. 不编造原文没有的精确设定（姓名、时间、数字、身份），缺失写「暂无」。
+6. sources 只在确有可核查名称时填，url 不确定就留空字符串。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "title": "书名或剧名",
+  "logline": "一句话卖点（≤30字）",
+  "genre": "类型",
+  "tags": ["卖点标签"],
+  "chapters": [{"no":1,"title":"章节标题","summary":"一句话梗概","characters":["人物"],"hooks":["钩子"]}],
+  "rhythm": {"acts":[{"act":"起","from":1,"to":3,"goal":"这一幕要完成什么"}],"pacingNote":"节奏快慢分布说明"},
+  "adaptationTips": ["改编建议"],
+  "sources": [{"name":"来源名","url":""}]
+}`
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   改编方案 / 导演阐述：基于原著或大纲做多集整稿切分、核心矛盾设定、导演阐述与题材钩子手册。 */
+const SCRIPT_DEVELOP_SYSTEM = `你是短剧「改编方案 / 导演阐述」策划。基于用户给的原著或已有分集大纲与规格，产出可直接执行的多集整稿方案。
+
+【硬要求】
+1. episodePlans 条数必须正好等于用户给的 episodes，index 从 1 连续编号；每条给 title / goal / keyEvents / cliffhanger。
+2. coreConflict 一句话说清「谁和谁、因为什么、赌注是什么」。
+3. adaptationApproach 写取舍：删什么、合并什么、心理描写如何改成可拍动作或 OS。
+4. directorStatement 用导演口吻写镜头气质、节奏、表演尺度与画面基调，不要写成套话。
+5. hookHandbook 每条给 type / technique / example；example 一律用中文引号「」，不要用英文双引号。
+6. continuityRules 只写跨集不能变的事实（人物关系、时间线、道具状态），不写可自由发挥的内容。
+7. 忠于原作，不发明新主线；原文没有的精确设定写「暂无」。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "title": "剧名",
+  "genre": "类型",
+  "logline": "一句话卖点（≤30字）",
+  "coreConflict": "核心矛盾（谁和谁、为什么、赌注）",
+  "adaptationApproach": "改编取舍说明",
+  "directorStatement": "导演阐述",
+  "hookHandbook": [{"type":"钩子类型","technique":"具体手法","example":"示例"}],
+  "episodePlans": [{"index":1,"title":"本集标题","goal":"本集目标","keyEvents":["关键事件"],"cliffhanger":"集尾悬念"}],
+  "continuityRules": ["跨集不变规则"]
+}`
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   视觉设定：跨场不变写 appearance，可变阶段写 states / variants；连戏锁只锁穿帮项；有台词者 voice 非空。 */
+const SCRIPT_ASSETS_SYSTEM = `你是短剧「视觉设定 / 连戏 Continuity」美术指导。只读输入剧本，产出视觉资产清单。
+
+【硬要求】
+1. 跨场不变的外貌写 appearance；会随剧情变化的阶段写 variants / states，不要把可变项混进 appearance。
+2. continuityLocks 只锁跨镜会穿帮的不变外观（伤疤、发色、服装、道具状态），每条给 lockWords 便于检索；不要锁剧情自由度。
+3. 有发声台词的人物 voice 必须非空（写音色、语速、口癖）；无台词人物 voice 给空字符串。
+4. voiceRef 写可参考的声音类型；promptName 是喂给生图模型的稳定提示词锚点（短词组即可）。
+5. locations[].orientation 写机位朝向与空间关系；props[].states 的 from / to 用集号或场次号。
+6. 不要生成图片，只输出设定文本；缺失字段写「暂无」。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "productionStyle": "整体制作风格与画面基调",
+  "eraSetting": "年代与地域设定",
+  "characters": [{
+    "name": "角色名",
+    "appearance": "跨场不变的外貌",
+    "variants": [{"name":"阶段名","appearance":"该阶段外观","episodes":"适用集号"}],
+    "voice": "有台词必填音色语速",
+    "voiceRef": "声音参考类型",
+    "lockWords": ["外观锁定词"],
+    "promptName": "生图提示词锚点"
+  }],
+  "locations": [{"name":"场景名","appearance":"空间与陈设","orientation":"机位朝向与空间关系"}],
+  "props": [{"name":"道具名","appearance":"常态外观","states":[{"state":"状态","from":"起始集场","to":"结束集场"}]}],
+  "continuityLocks": [{"id":"LOCK-001","label":"锁什么","scope":"适用范围","lockWords":["锁定词"]}]
+}`
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   分镜 / 首尾帧：每场戏有镜头覆盖，SHOT 编号 EP001-S001 稳定形式；首帧定起点、尾帧定终点，运镜写清起止落点。 */
+const SCRIPT_STORYBOARD_SYSTEM = `你是短剧「分镜师 / 首尾帧设计师」。把剧本拆成可逐镜生成的分镜表。
+
+【硬要求】
+1. 每一场戏至少有一个镜头覆盖；uncoveredScenes 列出无法覆盖的场次（没有就给空数组）。
+2. id 用 EP001-S001 形式稳定编号：EP + 三位集号 + -S + 三位场次号；episode / sceneNo 与 id 对应。
+3. startFrame 只定格起点，endFrame 只定格终点；firstFramePrompt / lastFramePrompt 分别描述这两帧（含景别、构图、光线、人物状态）。
+4. movement 写清运镜起止落点（从哪到哪、快或慢）；camera 写景别与机位；blocking 写多人走位与视线转移。
+5. refImages 是图片槽位，统一用 PLAN-xxx 占位（前端暂无真实图片），不要编造图片 URL。
+6. durationSec 按单集时长合理拆分；sound 写同期声、环境声与音乐点。
+7. 只输出文本分镜，不生成媒体。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "shots": [{
+    "id": "EP001-S001",
+    "episode": 1,
+    "sceneNo": 1,
+    "shotType": "景别",
+    "camera": "机位",
+    "movement": "运镜起止落点",
+    "startFrame": "起点画面",
+    "action": "本镜动作推进",
+    "endFrame": "终点画面",
+    "sound": "声音设计",
+    "blocking": "走位与视线转移",
+    "firstFramePrompt": "首帧生图提示词",
+    "lastFramePrompt": "尾帧生图提示词",
+    "refImages": ["PLAN-001"],
+    "durationSec": 4
+  }],
+  "uncoveredScenes": ["未覆盖场次"],
+  "summary": "整体分镜说明"
+}`
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   视频提示词：单镜动作推进、多人调度与视线转移、运镜、声音、GROUP-* 多镜合生、跨镜配乐表；不生成媒体。 */
+const SCRIPT_VIDEO_PROMPTS_SYSTEM = `你是短剧「AI 生视频提示词」导演。基于分镜表写逐镜提示词。
+
+【硬要求】
+1. shots[].shotId 必须对应分镜 id；prompt 按「景别 + 构图 + 光线 + 人物外观锁定词 + 单镜动作推进 + 运镜起止 + 声音」顺序写，一条镜头只推进一个动作。
+2. 多人镜头写清调度与视线转移；continuityRefs 引用视觉设定的 continuityLocks id 或 lockWords，保证跨镜不穿帮。
+3. groups 用 GROUP-* 编号（GROUP-001 起），shotIds 引用 shots[].shotId；prompt 写多镜合生的统一氛围与动作衔接，不要逐镜复述。
+4. musicPlan 按集列情绪与描述；episode 从 1 连续编号。
+5. 不生成媒体、不返回图片或视频 URL，只输出提示词文本。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "shots": [{
+    "shotId": "EP001-S001",
+    "prompt": "单镜视频提示词",
+    "action": "单镜动作推进",
+    "movement": "运镜起止落点",
+    "camera": "景别与机位",
+    "sound": "声音设计",
+    "continuityRefs": ["LOCK-001"],
+    "durationSec": 4
+  }],
+  "groups": [{"id":"GROUP-001","shotIds":["EP001-S001"],"prompt":"多镜合生提示词"}],
+  "musicPlan": [{"episode":1,"mood":"情绪","description":"配乐描述"}]
+}`
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   结构 / 剧情审查：只列核对结果与建议、不替人做创作判断；severity 归一化为 high/medium/low。 */
+const SCRIPT_REVIEW_SYSTEM = `你是短剧「结构 / 剧情 / 连戏」审查员。只做核对，不做创作决定。
+
+【硬要求】
+1. score 为 0-100 的综合分，verdict 给一句结论。
+2. structural / plot / continuity 三类各列问题；每条 issue 写清核对结果，suggestion 只给可执行的修正方向，不替用户改写正文。
+3. severity 只能是 high / medium / low 三选一；没有问题就给空数组。
+4. strengths 只列核对中确实成立的优点，不要泛泛夸奖。
+5. 引用剧本、分镜或提示词里真实存在的场次或镜号；没有依据的问题不要列。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "score": 78,
+  "structural": [{"issue":"核对发现的问题","severity":"high","suggestion":"修正方向"}],
+  "plot": [{"issue":"核对发现的问题","severity":"medium","suggestion":"修正方向"}],
+  "continuity": [{"issue":"核对发现的问题","severity":"low","suggestion":"修正方向"}],
+  "strengths": ["确实成立的优点"],
+  "verdict": "一句话结论"
+}`
+
+/* 来源：drama-skills (MIT, zenstory-ai/drama-skills contributors) · 迁移日期：2026-11-25
+   对标拆解：按集长/镜长/对白密度/开场与集尾拆解，反推为剧本/设定可用轮廓；字段缺失写「暂无」不编造。 */
+const SCRIPT_BREAKDOWN_SYSTEM = `你是短剧「对标拆解员」。用户贴一段对标剧集文本（分集梗概、剧本片段或平台文案），你要反推其结构与节奏。
+
+【硬要求】
+1. avgEpisodeSec / avgShotSec 只填能从文本算出的数字；算不出写「暂无」，不要猜。
+2. dialogueDensity 写对白密度（如「每集约 20 句」）；算不出写「暂无」。
+3. openingPattern / endingPattern 分别概括开场钩子套路与集尾悬念套路；文本没有就写「暂无」。
+4. beats[].position 用「开篇 / 10% / 30% / 50% / 70% / 集尾」等位置标签，type 用「钩子 / 冲突 / 反转 / 爽点 / 悬念」之一，description 一句话。
+5. gaps 列出对标文本的缺口（如缺人物设定、缺镜长数据），不要脑补补全。
+6. reverseOutline 把拆解结果反推成可用的剧本 / 设定轮廓，index 从 1 连续，每条 title 与 summary 各一句话。
+7. 字段缺失统一写「暂无」，不编造精确数字。
+
+【严格返回 JSON】只输出严格 JSON，不要解释，不要 markdown 代码块：
+{
+  "avgEpisodeSec": 90,
+  "avgShotSec": 4,
+  "dialogueDensity": "每集约 20 句",
+  "openingPattern": "开场钩子套路",
+  "endingPattern": "集尾悬念套路",
+  "beats": [{"position":"开篇","type":"钩子","description":"一句话描述"}],
+  "gaps": ["文本缺口"],
+  "reverseOutline": [{"index":1,"title":"轮廓标题","summary":"一句话梗概"}]
+}`
 
 /* ============================================================
    v10.10 新增二：文风炼金（StyleForge）
@@ -4776,10 +5121,17 @@ ${prevBlock}${dirTextChapter}${lockBlock(normLocked(body.locked))}`
       if (body.action === 'toScript') {
         const text = toStr(body.text).trim()
         if (!text) return err('需要 text（要改编的原文）')
-        const episodes = Math.max(1, Math.min(12, Number(body.episodes) || 3))
-        const secPerEp = Math.max(30, Math.min(300, Number(body.secPerEp) || 90))
+        // v18.8：放开集数/时长上限（旧版 1-12 集 / 30-300 秒根本做不了短剧）
+        // 单次调用仍只生成一批正文（默认 8 集），全本 100-250 集走 scriptOutline + 分批 toScript
+        const episodes = Math.max(1, Math.min(400, Math.round(Number(body.episodes) || 8)))
+        const secPerEp = Math.max(30, Math.min(900, Math.round(Number(body.secPerEp) || 90)))
+        const rangeStart = Math.max(1, Math.min(episodes, Math.round(Number(body.rangeStart) || 1)))
+        const batchSize = Math.max(1, Math.min(12, Math.round(Number(body.batchSize) || episodes)))
+        const rangeEnd = Math.min(episodes, rangeStart + batchSize - 1)
+        const isBatch = rangeStart > 1 || rangeEnd < episodes
         const platform = toStr(body.platform).trim() || '通用'
         const styleNote = toStr(body.styleNote).trim()
+        const outline = Array.isArray(body.outline) ? body.outline : []
         const canvases = body.canvases && typeof body.canvases === 'object' ? body.canvases : {}
 
         const canvasBlock = DIMENSIONS.map(d => {
@@ -4792,24 +5144,35 @@ ${prevBlock}${dirTextChapter}${lockBlock(normLocked(body.locked))}`
         // 按单集秒数额算台词量：观众一秒听 4-5 个字，所以 90 秒 ≈ 20 句，180 秒 ≈ 45 句
         const linesPerEp = Math.max(14, Math.min(60, Math.round(secPerEp / 4)))
         const scenesPerEp = secPerEp <= 120 ? 3 : 4
+        const outlineBlock = outline.length
+          ? `\n【全本分集大纲（本次只写其中第 ${rangeStart}-${rangeEnd} 集的完整正文，其余不要写）】\n` +
+            outline.slice(0, 400).map((o, i) =>
+              `${i + 1}. ${toStr(o.title) || ''}｜钩子：${toStr(o.hook) || ''}｜冲突：${toStr(o.conflict) || ''}｜反转：${toStr(o.twist) || ''}｜悬念：${toStr(o.cliffhanger) || ''}`
+            ).join('\n') + '\n'
+          : ''
 
         const input =
           `【要改编的原文】\n${text.slice(0, 12000)}\n\n` +
-          `【改编规格】\n平台：${platform}\n集数：${episodes} 集\n单集时长：${secPerEp} 秒\n` +
+          `【改编规格】\n平台：${platform}\n全剧总集数：${episodes} 集\n单集时长：${secPerEp} 秒\n` +
+          (isBatch
+            ? `本次任务：只写第 ${rangeStart} 集到第 ${rangeEnd} 集的完整正文（共 ${rangeEnd - rangeStart + 1} 集）\n`
+            : `本次任务：写完全部 ${episodes} 集完整正文\n`) +
           `每集台词量：约 ${linesPerEp} 句（一句 ≤20 字）\n每集场景数：${scenesPerEp} 场左右\n` +
           (canvasBlock ? `\n【原作 7 块画布设定（有冲突时以设定为准）】\n${canvasBlock}\n` : '') +
+          outlineBlock +
           (styleNote ? `\n【用户补充要求】\n${styleNote}\n` : '') +
-          `\n请按 SCRIPT 规范输出严格 JSON，episodes 必须正好 ${episodes} 集。`
+          `\n请按 SCRIPT 规范输出严格 JSON，episodes 必须正好 ${rangeEnd - rangeStart + 1} 集，` +
+          `index 从 ${rangeStart} 编到 ${rangeEnd}（分批时不要把 index 从 1 重编）。`
 
         const { parsed, incomplete } = await callDeepSeek(env, {
           instructions: SCRIPT_SYSTEM,
           input,
-          // 剧本按行输出，长剧集很容易顶到上限：这里给足额度（旧值 16000 会把 3 集以上的剧本截断）
+          // 一批最多 12 集完整正文，32k 足够；全本大纲走 scriptOutline，不在这里硬塞
           maxOutputTokens: 32000,
-          useSearch: false, // 改编自己写的东西，不需要联网
+          useSearch: true, // v18.8：联网对照真实短剧剧本的节奏与钩子密度
         })
         if (incomplete) {
-          return err('剧本太长被截断了（max_output_tokens 不够）。请把集数或单集时长调小一点再试。')
+          return err('这一批剧本太长被截断了。请把「每批集数」调小（建议 3-5 集）或缩短单集时长再试。')
         }
 
         // 剧本正文按「行」组织：beat=△动作 / line=台词 / vo=画外音 / os=内心独白 / sub=字幕空镜
@@ -4829,7 +5192,8 @@ ${prevBlock}${dirTextChapter}${lockBlock(normLocked(body.locked))}`
             .filter(l => l.text)
 
         const eps = (Array.isArray(parsed.episodes) ? parsed.episodes : []).slice(0, 12).map((e, i) => {
-          const epIndex = Number(e?.index) || i + 1
+          // 分批时模型偶尔会把 index 从 1 重编，这里强制落到本批真实区间
+          const epIndex = isBatch ? rangeStart + i : (Number(e?.index) || i + 1)
           return {
             index: epIndex,
             title: toStr(e?.title) || `第${i + 1}集`,
@@ -4875,7 +5239,384 @@ ${prevBlock}${dirTextChapter}${lockBlock(normLocked(body.locked))}`
             .map(p => ({ scene: toStr(p?.scene), prompt: toStr(p?.prompt) }))
             .filter(p => p.prompt),
           notes: (Array.isArray(parsed.notes) ? parsed.notes : []).map(toStr).filter(Boolean),
+          settings: { episodes, secPerEp, platform, rangeStart, rangeEnd, isBatch },
+        })
+      }
+
+      // —— v18.8：联网匹配规格 —— 按原文字数 + 平台算出集数×单集时长 ——
+      if (body.action === 'scriptSpec') {
+        const text = toStr(body.text).trim()
+        const words = Math.max(1, Number(body.words) || 0) || text.replace(/\s/g, '').length
+        if (!text && !body.words) return err('需要 text 或 words')
+        const platform = toStr(body.platform).trim() || '通用'
+        const local = matchScriptSpec({ words, platform, preferEpisodes: body.preferEpisodes })
+
+        // 联网：让模型对照网上真实短剧剧本的规格，给出针对这段原文的校准建议
+        let market = null
+        try {
+          const { parsed } = await callDeepSeek(env, {
+            instructions: `你是短剧制片人。联网检索 2025-2026 年网络短剧剧本的公开行业规格（红果/抖音/快手/番茄/爱奇艺/腾讯），
+核对：单集时长、单集字数、主流总集数与长线剧集数、开篇钩子秒数、结尾悬念写法。
+只返回 JSON，不要解释：{"sources":[{"name":"来源名","episodes":"集数区间","sec":"单集秒数区间","words":"单集字数"}],"advice":"针对这段原文的规格建议（≤60字）"}`,
+            input: `原文前 1200 字：\n${text.slice(0, 1200)}\n\n本地按行业基准算出的规格：${local.episodes} 集 × ${local.secPerEp} 秒（${local.basis}）。请联网核对并给出是否要调整的建议。`,
+            maxOutputTokens: 3000,
+            useSearch: true,
+            forceSearch: true,
+          })
+          market = {
+            sources: (Array.isArray(parsed.sources) ? parsed.sources : []).slice(0, 6).map(s => ({
+              name: toStr(s?.name), episodes: toStr(s?.episodes),
+              sec: toStr(s?.sec), words: toStr(s?.words),
+            })).filter(s => s.name),
+            advice: toStr(parsed.advice),
+          }
+        } catch (e) {
+          market = { sources: [], advice: `联网核对失败（${String(e.message || e).slice(0, 80)}），已用本地行业基准` }
+        }
+        return ok({ ...local, market })
+      }
+
+      // —— v18.8：全本分集大纲 —— 一次出 100-250 集纲要，正文另走 toScript 分批 ——
+      if (body.action === 'scriptOutline') {
+        const text = toStr(body.text).trim()
+        if (!text) return err('需要 text')
+        const episodes = Math.max(10, Math.min(400, Math.round(Number(body.episodes) || 100)))
+        const secPerEp = Math.max(30, Math.min(900, Math.round(Number(body.secPerEp) || 90)))
+        const platform = toStr(body.platform).trim() || '通用'
+        const styleNote = toStr(body.styleNote).trim()
+        const canvases = body.canvases && typeof body.canvases === 'object' ? body.canvases : {}
+        const canvasBlock = DIMENSIONS.map(d => {
+          const v = toStr(canvases[d]).trim()
+          return v ? `${d}：${v}` : ''
+        }).filter(Boolean).join('\n')
+
+        const input =
+          `【小说原文】\n${text.slice(0, 16000)}\n\n` +
+          `【规格】平台：${platform}｜总集数：${episodes} 集｜单集：${secPerEp} 秒\n` +
+          (canvasBlock ? `\n【原作 7 块画布】\n${canvasBlock}\n` : '') +
+          (styleNote ? `\n【用户补充要求】\n${styleNote}\n` : '') +
+          `\n请输出正好 ${episodes} 集的分集大纲 JSON。第 1 集必须有 3 秒钩子，每集结尾必须留悬念，按六幕式分配。`
+
+        const { parsed, incomplete } = await callDeepSeek(env, {
+          instructions: SCRIPT_OUTLINE_SYSTEM,
+          input,
+          maxOutputTokens: 30000,
+          useSearch: true, // 联网对照当下平台热门短剧的钩子与节奏
+        })
+        if (incomplete) return err('大纲被截断了，请把集数调小（建议先试 100 集）再生成')
+
+        const eps = (Array.isArray(parsed.episodes) ? parsed.episodes : []).slice(0, 400).map((e, i) => ({
+          index: Number(e?.index) || i + 1,
+          title: toStr(e?.title) || `第${i + 1}集`,
+          hook: toStr(e?.hook),
+          conflict: toStr(e?.conflict),
+          twist: toStr(e?.twist),
+          cliffhanger: toStr(e?.cliffhanger),
+          act: toStr(e?.act),
+          durationSec: Number(e?.durationSec) || secPerEp,
+        }))
+        // 集数不足时按用户要求补齐，保证全本集数对齐
+        while (eps.length < episodes) {
+          const i = eps.length
+          eps.push({ index: i + 1, title: `第${i + 1}集`, hook: '', conflict: '',
+                     twist: '', cliffhanger: '', act: '', durationSec: secPerEp })
+        }
+        return ok({
+          title: toStr(parsed.title) || '未命名短剧',
+          genre: toStr(parsed.genre),
+          logline: toStr(parsed.logline),
+          acts: (Array.isArray(parsed.acts) ? parsed.acts : []).slice(0, 6).map(a => ({
+            act: toStr(a?.act), from: Number(a?.from) || 0, to: Number(a?.to) || 0, goal: toStr(a?.goal),
+          })),
+          episodes: eps.slice(0, episodes),
+          notes: (Array.isArray(parsed.notes) ? parsed.notes : []).map(toStr).filter(Boolean),
           settings: { episodes, secPerEp, platform },
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：原著快评 ——
+      if (body.action === 'scriptNovelAnalyze') {
+        const text = toStr(body.text).trim().slice(0, 16000)
+        if (!text) return err('需要 text（要快评的原著）')
+        const platform = toStr(body.platform).trim().slice(0, 40) || '通用'
+        const input =
+          `【小说原文（抽样快评，不是全文精读）】\n${text}\n\n` +
+          `【目标平台】${platform}\n\n请按规范输出严格 JSON。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_NOVEL_ANALYZE_SYSTEM,
+          input,
+          maxOutputTokens: 16000,
+          useSearch: false,
+        })
+        return ok({
+          title: dStr(parsed?.title, 80),
+          logline: dStr(parsed?.logline, 200),
+          genre: dStr(parsed?.genre, 60),
+          tags: dList(parsed?.tags, 12, 40),
+          chapters: (Array.isArray(parsed?.chapters) ? parsed.chapters : []).slice(0, 120).map(c => ({
+            no: dNum(c?.no),
+            title: dStr(c?.title, 80),
+            summary: dStr(c?.summary, 400),
+            characters: dList(c?.characters, 12, 40),
+            hooks: dList(c?.hooks, 8, 160),
+          })),
+          rhythm: {
+            acts: (Array.isArray(parsed?.rhythm?.acts) ? parsed.rhythm.acts : []).slice(0, 12).map(a => ({
+              act: dStr(a?.act, 20), from: dNum(a?.from), to: dNum(a?.to), goal: dStr(a?.goal, 200),
+            })),
+            pacingNote: dStr(parsed?.rhythm?.pacingNote, 600),
+          },
+          adaptationTips: dList(parsed?.adaptationTips, 20, 300),
+          sources: (Array.isArray(parsed?.sources) ? parsed.sources : []).slice(0, 8).map(s => ({
+            name: dStr(s?.name, 80), url: dStr(s?.url, 300),
+          })).filter(s => s.name),
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：改编方案 / 导演阐述 ——
+      if (body.action === 'scriptDevelop') {
+        const text = toStr(body.text).trim().slice(0, 16000)
+        const outlineRaw = Array.isArray(body.outline) ? body.outline : []
+        if (!text && !outlineRaw.length) return err('需要 text 或 outline')
+        const episodes = Math.max(1, Math.min(400, Math.round(Number(body.episodes) || 1)))
+        const secPerEp = Math.max(30, Math.min(900, Math.round(Number(body.secPerEp) || 90)))
+        const platform = toStr(body.platform).trim().slice(0, 40) || '通用'
+        const styleNote = toStr(body.styleNote).trim().slice(0, 2000)
+        const canvases = body.canvases && typeof body.canvases === 'object' ? body.canvases : {}
+        const canvasBlock = DIMENSIONS.map(d => {
+          const v = dStr(canvases[d], 600)
+          return v ? `${d}：${v}` : ''
+        }).filter(Boolean).join('\n')
+        const outlineBlock = outlineRaw.length
+          ? `\n【已有分集大纲（最多取前 400 条）】\n` + outlineRaw.slice(0, 400).map((o, i) =>
+              `${i + 1}. ${dStr(o?.title, 80)}｜钩子：${dStr(o?.hook, 120)}｜冲突：${dStr(o?.conflict, 120)}｜悬念：${dStr(o?.cliffhanger, 120)}`
+            ).join('\n') + '\n'
+          : ''
+        const input =
+          `【原著 / 改编依据】\n${text || '（用户只给了大纲）'}\n\n` +
+          `【规格】平台：${platform}｜总集数：${episodes}｜单集：${secPerEp} 秒\n` +
+          (canvasBlock ? `\n【画布设定（有冲突以设定为准）】\n${canvasBlock}\n` : '') +
+          outlineBlock +
+          (styleNote ? `\n【用户补充要求】\n${styleNote}\n` : '') +
+          `\n请输出正好 ${episodes} 集的改编方案严格 JSON。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_DEVELOP_SYSTEM,
+          input,
+          maxOutputTokens: 24000,
+          useSearch: false,
+        })
+        return ok({
+          title: dStr(parsed?.title, 80),
+          genre: dStr(parsed?.genre, 60),
+          logline: dStr(parsed?.logline, 200),
+          coreConflict: dStr(parsed?.coreConflict, 400),
+          adaptationApproach: dStr(parsed?.adaptationApproach, 2000),
+          directorStatement: dStr(parsed?.directorStatement, 2000),
+          hookHandbook: (Array.isArray(parsed?.hookHandbook) ? parsed.hookHandbook : []).slice(0, 20).map(h => ({
+            type: dStr(h?.type, 60), technique: dStr(h?.technique, 300), example: dStr(h?.example, 400),
+          })).filter(h => h.type || h.technique),
+          episodePlans: (Array.isArray(parsed?.episodePlans) ? parsed.episodePlans : []).slice(0, 400).map((p, i) => ({
+            index: dNum(p?.index, i + 1),
+            title: dStr(p?.title, 80),
+            goal: dStr(p?.goal, 300),
+            keyEvents: dList(p?.keyEvents, 10, 200),
+            cliffhanger: dStr(p?.cliffhanger, 300),
+          })),
+          continuityRules: dList(parsed?.continuityRules, 30, 300),
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：视觉设定 ——
+      if (body.action === 'scriptAssets') {
+        const script = dParse(body.script)
+        const styleNote = toStr(body.styleNote).trim().slice(0, 2000)
+        if (!Object.keys(script).length) return err('需要 script（剧本 JSON）')
+        const input =
+          `【剧本 JSON】\n${JSON.stringify(script).slice(0, 60000)}\n\n` +
+          (styleNote ? `【用户补充要求】\n${styleNote}\n\n` : '') +
+          `请按规范输出严格 JSON。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_ASSETS_SYSTEM,
+          input,
+          maxOutputTokens: 16000,
+          useSearch: false,
+        })
+        return ok({
+          productionStyle: dStr(parsed?.productionStyle, 600),
+          eraSetting: dStr(parsed?.eraSetting, 300),
+          characters: (Array.isArray(parsed?.characters) ? parsed.characters : []).slice(0, 30).map(c => ({
+            name: dStr(c?.name, 40),
+            appearance: dStr(c?.appearance, 800),
+            variants: (Array.isArray(c?.variants) ? c.variants : []).slice(0, 10).map(v => ({
+              name: dStr(v?.name, 60), appearance: dStr(v?.appearance, 500), episodes: dStr(v?.episodes, 100),
+            })),
+            voice: dStr(c?.voice, 300),
+            voiceRef: dStr(c?.voiceRef, 200),
+            lockWords: dList(c?.lockWords, 20, 60),
+            promptName: dStr(c?.promptName, 120),
+          })).filter(c => c.name),
+          locations: (Array.isArray(parsed?.locations) ? parsed.locations : []).slice(0, 30).map(l => ({
+            name: dStr(l?.name, 60), appearance: dStr(l?.appearance, 600), orientation: dStr(l?.orientation, 300),
+          })).filter(l => l.name),
+          props: (Array.isArray(parsed?.props) ? parsed.props : []).slice(0, 40).map(p => ({
+            name: dStr(p?.name, 60),
+            appearance: dStr(p?.appearance, 600),
+            states: (Array.isArray(p?.states) ? p.states : []).slice(0, 8).map(s => ({
+              state: dStr(s?.state, 100), from: dStr(s?.from, 80), to: dStr(s?.to, 80),
+            })),
+          })).filter(p => p.name),
+          continuityLocks: (Array.isArray(parsed?.continuityLocks) ? parsed.continuityLocks : []).slice(0, 30).map(l => ({
+            id: dStr(l?.id, 60), label: dStr(l?.label, 200), scope: dStr(l?.scope, 200), lockWords: dList(l?.lockWords, 20, 60),
+          })).filter(l => l.id || l.label),
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：分镜 / 首尾帧 ——
+      if (body.action === 'scriptStoryboard') {
+        const script = dParse(body.script)
+        const assets = dParse(body.assets)
+        const styleNote = toStr(body.styleNote).trim().slice(0, 2000)
+        if (!Object.keys(script).length) return err('需要 script（剧本 JSON）')
+        const input =
+          `【剧本 JSON】\n${JSON.stringify(script).slice(0, 60000)}\n\n` +
+          (Object.keys(assets).length ? `【已确定的视觉设定 JSON】\n${JSON.stringify(assets).slice(0, 20000)}\n\n` : '') +
+          (styleNote ? `【用户补充要求】\n${styleNote}\n\n` : '') +
+          `请按规范输出严格 JSON，SHOT 编号用 EP001-S001 形式，refImages 用 PLAN-xxx 占位。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_STORYBOARD_SYSTEM,
+          input,
+          maxOutputTokens: 30000,
+          useSearch: false,
+        })
+        const shots = (Array.isArray(parsed?.shots) ? parsed.shots : []).slice(0, 300).map(s => {
+          const episode = dNum(s?.episode, 1)
+          const sceneNo = dNum(s?.sceneNo, 1)
+          const rawId = dStr(s?.id, 40)
+          const id = /^EP\d{3}-S\d{3}$/.test(rawId)
+            ? rawId
+            : `EP${String(episode).padStart(3, '0')}-S${String(sceneNo).padStart(3, '0')}`
+          return {
+            id,
+            episode,
+            sceneNo,
+            shotType: dStr(s?.shotType, 80),
+            camera: dStr(s?.camera, 200),
+            movement: dStr(s?.movement, 400),
+            startFrame: dStr(s?.startFrame, 600),
+            action: dStr(s?.action, 600),
+            endFrame: dStr(s?.endFrame, 600),
+            sound: dStr(s?.sound, 400),
+            blocking: dStr(s?.blocking, 500),
+            firstFramePrompt: dStr(s?.firstFramePrompt, 1200),
+            lastFramePrompt: dStr(s?.lastFramePrompt, 1200),
+            refImages: dList(s?.refImages, 8, 80),
+            durationSec: dNum(s?.durationSec, 4),
+          }
+        })
+        return ok({
+          shots,
+          uncoveredScenes: dList(parsed?.uncoveredScenes, 40, 200),
+          summary: dStr(parsed?.summary, 1000),
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：视频提示词 ——
+      if (body.action === 'scriptVideoPrompts') {
+        const storyboard = dParse(body.storyboard)
+        const assets = dParse(body.assets)
+        const styleNote = toStr(body.styleNote).trim().slice(0, 2000)
+        if (!Object.keys(storyboard).length) return err('需要 storyboard（分镜 JSON）')
+        const input =
+          `【分镜 JSON】\n${JSON.stringify(storyboard).slice(0, 60000)}\n\n` +
+          (Object.keys(assets).length ? `【已确定的视觉设定 JSON】\n${JSON.stringify(assets).slice(0, 20000)}\n\n` : '') +
+          (styleNote ? `【用户补充要求】\n${styleNote}\n\n` : '') +
+          `请按规范输出严格 JSON，不生成媒体。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_VIDEO_PROMPTS_SYSTEM,
+          input,
+          maxOutputTokens: 24000,
+          useSearch: false,
+        })
+        return ok({
+          shots: (Array.isArray(parsed?.shots) ? parsed.shots : []).slice(0, 300).map(s => ({
+            shotId: dStr(s?.shotId, 40),
+            prompt: dStr(s?.prompt, 2000),
+            action: dStr(s?.action, 600),
+            movement: dStr(s?.movement, 400),
+            camera: dStr(s?.camera, 200),
+            sound: dStr(s?.sound, 400),
+            continuityRefs: dList(s?.continuityRefs, 20, 80),
+            durationSec: dNum(s?.durationSec, 4),
+          })).filter(s => s.shotId),
+          groups: (Array.isArray(parsed?.groups) ? parsed.groups : []).slice(0, 60).map(g => ({
+            id: dStr(g?.id, 40), shotIds: dList(g?.shotIds, 40, 40), prompt: dStr(g?.prompt, 2000),
+          })).filter(g => g.id),
+          musicPlan: (Array.isArray(parsed?.musicPlan) ? parsed.musicPlan : []).slice(0, 400).map(m => ({
+            episode: dNum(m?.episode), mood: dStr(m?.mood, 100), description: dStr(m?.description, 400),
+          })),
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：结构 / 剧情审查 ——
+      if (body.action === 'scriptReview') {
+        const script = dParse(body.script)
+        const assets = dParse(body.assets)
+        const storyboard = dParse(body.storyboard)
+        const videoPrompts = dParse(body.videoPrompts)
+        if (!Object.keys(script).length && !Object.keys(storyboard).length) return err('需要 script 或 storyboard')
+        const normIssues = v =>
+          (Array.isArray(v) ? v : []).slice(0, 40).map(x => ({
+            issue: dStr(x?.issue, 600), severity: dSeverity(x?.severity), suggestion: dStr(x?.suggestion, 600),
+          })).filter(x => x.issue)
+        const input =
+          `【剧本 JSON】\n${Object.keys(script).length ? JSON.stringify(script).slice(0, 60000) : '（未提供）'}\n\n` +
+          (Object.keys(assets).length ? `【视觉设定 JSON】\n${JSON.stringify(assets).slice(0, 20000)}\n\n` : '') +
+          (Object.keys(storyboard).length ? `【分镜 JSON】\n${JSON.stringify(storyboard).slice(0, 30000)}\n\n` : '') +
+          (Object.keys(videoPrompts).length ? `【视频提示词 JSON】\n${JSON.stringify(videoPrompts).slice(0, 20000)}\n\n` : '') +
+          `请只做核对并给出建议，输出严格 JSON。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_REVIEW_SYSTEM,
+          input,
+          maxOutputTokens: 12000,
+          useSearch: false,
+        })
+        return ok({
+          score: Math.max(0, Math.min(100, Math.round(dNum(parsed?.score)))),
+          structural: normIssues(parsed?.structural),
+          plot: normIssues(parsed?.plot),
+          continuity: normIssues(parsed?.continuity),
+          strengths: dList(parsed?.strengths, 20, 400),
+          verdict: dStr(parsed?.verdict, 800),
+        })
+      }
+
+      // —— drama-skills 迁移（MIT, zenstory-ai/drama-skills contributors · 2026-11-25）：对标拆解 ——
+      if (body.action === 'scriptBreakdown') {
+        const text = toStr(body.text).trim().slice(0, 16000)
+        if (!text) return err('需要 text（对标剧集文本）')
+        const platform = toStr(body.platform).trim().slice(0, 40) || '通用'
+        const input =
+          `【对标剧集文本】\n${text}\n\n【平台】${platform}\n\n` +
+          `请按规范输出严格 JSON，字段缺失写「暂无」不编造。`
+        const { parsed } = await callDeepSeek(env, {
+          instructions: SCRIPT_BREAKDOWN_SYSTEM,
+          input,
+          maxOutputTokens: 16000,
+          useSearch: false,
+        })
+        return ok({
+          avgEpisodeSec: dNumOrNA(parsed?.avgEpisodeSec),
+          avgShotSec: dNumOrNA(parsed?.avgShotSec),
+          dialogueDensity: dStr(parsed?.dialogueDensity, 200) || '暂无',
+          openingPattern: dStr(parsed?.openingPattern, 400) || '暂无',
+          endingPattern: dStr(parsed?.endingPattern, 400) || '暂无',
+          beats: (Array.isArray(parsed?.beats) ? parsed.beats : []).slice(0, 30).map(b => ({
+            position: dStr(b?.position, 40), type: dStr(b?.type, 40), description: dStr(b?.description, 400),
+          })).filter(b => b.position || b.description),
+          gaps: dList(parsed?.gaps, 20, 300),
+          reverseOutline: (Array.isArray(parsed?.reverseOutline) ? parsed.reverseOutline : []).slice(0, 400).map((o, i) => ({
+            index: dNum(o?.index, i + 1), title: dStr(o?.title, 80), summary: dStr(o?.summary, 400),
+          })),
         })
       }
 

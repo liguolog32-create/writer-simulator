@@ -3506,6 +3506,42 @@ textarea:focus, input:focus, select:focus {
   line-height: 1.8;
   resize: vertical;
 }
+/* v18.8：集数/时长自定义 + 联网规格匹配 + 全本大纲 */
+.script-presets { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: -4px 0 8px; font-size: 11.5px; color: var(--fg-3); }
+.script-presets-sep { margin-left: 10px; }
+.chip {
+  border: 0.5px solid var(--border-2); background: var(--bg-1); color: var(--fg-2);
+  border-radius: 999px; padding: 2px 9px; font-size: 11px; cursor: pointer; font-family: inherit;
+}
+.chip:hover { border-color: var(--accent); color: var(--fg); }
+.chip.on { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+.script-spec-card {
+  margin: 12px 0; padding: 14px 16px; border: 0.5px solid var(--accent-bg);
+  border-radius: var(--radius); background: var(--bg-1);
+}
+.script-spec-card h4 { margin: 0 0 8px; font-size: 13px; color: var(--accent); font-weight: 600; }
+.spec-big { font-size: 26px; font-weight: 600; color: var(--fg); letter-spacing: 0.02em; }
+.spec-big span { color: var(--fg-3); margin: 0 6px; font-weight: 400; }
+.spec-basis { font-size: 12px; color: var(--fg-1); margin: 6px 0; }
+.spec-detail, .spec-ref { font-size: 11px; color: var(--fg-3); line-height: 1.7; margin: 4px 0; }
+.spec-advice { font-size: 11.5px; color: var(--accent); margin: 6px 0; line-height: 1.6; }
+.spec-sources { margin: 8px 0 4px; padding-left: 18px; font-size: 11px; color: var(--fg-2); line-height: 1.7; }
+
+.script-outline { margin-top: 14px; border-top: 0.5px solid var(--border-2); padding-top: 14px; }
+.outline-acts { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.outline-act { font-size: 11px; color: var(--accent); background: var(--accent-bg); border-radius: 999px; padding: 3px 10px; }
+.outline-next { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 10px 0 12px; }
+.outline-progress { font-size: 11.5px; color: var(--fg-3); }
+.outline-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 8px; max-height: 560px; overflow-y: auto; }
+.outline-card { border: 0.5px solid var(--border-2); border-radius: var(--radius); padding: 9px 11px; background: var(--bg-1); }
+.outline-card.written { border-color: var(--accent); }
+.outline-head { display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap; margin-bottom: 5px; font-size: 11px; color: var(--fg-3); }
+.outline-head b { font-size: 12.5px; color: var(--fg); font-weight: 600; }
+.outline-act-sm { color: var(--accent); }
+.outline-done { margin-left: auto; color: var(--accent); font-size: 10px; }
+.outline-card p { margin: 2px 0; font-size: 11px; color: var(--fg-2); line-height: 1.6; }
+
 .script-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
 .script-result { margin-top: 14px; border-top: 0.5px solid var(--border-2); padding-top: 14px; }
 .script-title { margin: 0 0 6px; font-size: 17px; font-weight: 600; display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
@@ -9448,3 +9484,103 @@ button.layout .next-step-card, .layout .next-step-card.mine { cursor: pointer; }
 }
 .sh-actions-count { color: var(--fg-2); font-size: 12px; margin-right: auto; }
 .sh-after-hint { color: var(--fg-3); font-size: 11px; margin: 8px 0 0; line-height: 1.5; }
+
+/* ---------------- drama-skills 迁移（MIT）：短剧七能力卡片 / 五份文档导出 ---------------- */
+.drama-tip {
+  margin: 8px 0 10px; padding: 8px 10px;
+  border-left: 2px solid var(--accent); border-radius: var(--radius);
+  background: var(--accent-bg); color: var(--fg-1);
+  font-size: 11.5px; line-height: 1.7;
+}
+.drama-field { display: block; margin: 10px 0; }
+.drama-field > span { display: block; margin-bottom: 5px; font-size: 11.5px; color: var(--fg-2); }
+.drama-field textarea {
+  width: 100%; box-sizing: border-box; resize: vertical;
+  padding: 8px 10px; border: 0.5px solid var(--border-2); border-radius: var(--radius);
+  background: var(--bg-elev-2); color: var(--fg); font: inherit; font-size: 12px; line-height: 1.6;
+}
+.drama-field textarea:focus { outline: none; border-color: var(--accent); }
+.drama-export-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+.drama-export-hint { font-size: 11px; color: var(--fg-3); line-height: 1.6; }
+.drama-btn-off { opacity: 0.45; }
+
+.drama-card {
+  margin: 12px 0; padding: 14px 16px;
+  border: 0.5px solid var(--accent-bg); border-radius: var(--radius);
+  background: var(--bg-1);
+}
+.drama-card-title {
+  margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--accent);
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+}
+.drama-lead { margin: 0 0 6px; font-size: 12.5px; color: var(--fg-1); line-height: 1.7; }
+.drama-muted { margin: 4px 0; font-size: 11.5px; color: var(--fg-3); line-height: 1.7; overflow-wrap: anywhere; }
+.drama-sub {
+  margin: 10px 0 6px; padding-bottom: 4px;
+  border-bottom: 0.5px dashed var(--border-2);
+  font-size: 12px; font-weight: 600; color: var(--fg-1);
+}
+.drama-kv { margin: 5px 0; font-size: 11.5px; color: var(--fg-2); line-height: 1.7; overflow-wrap: anywhere; }
+.drama-kv b { color: var(--accent); margin-right: 8px; font-weight: 600; }
+.drama-hook { margin: 3px 0; font-size: 11.5px; color: #d98b2b; line-height: 1.6; }
+.drama-cliff { margin: 3px 0; font-size: 11.5px; color: #2f9e6f; line-height: 1.6; }
+.drama-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px; max-height: 520px; overflow-y: auto;
+}
+.drama-item {
+  border: 0.5px solid var(--border-2); border-radius: var(--radius);
+  padding: 8px 10px; background: var(--bg-elev);
+}
+.drama-item b { font-size: 12px; color: var(--fg); font-weight: 600; }
+.drama-item p { margin: 3px 0; font-size: 11.5px; color: var(--fg-2); line-height: 1.6; overflow-wrap: anywhere; }
+.drama-bullets { margin: 4px 0; padding-left: 18px; font-size: 11.5px; color: var(--fg-2); line-height: 1.7; }
+.drama-bullets li { margin: 2px 0; overflow-wrap: anywhere; }
+.drama-pre {
+  margin: 6px 0; padding: 8px 10px;
+  border: 0.5px solid var(--border-2); border-radius: var(--radius);
+  background: var(--bg-elev-2); color: var(--fg-2);
+  font: inherit; font-size: 11.5px; line-height: 1.7;
+  white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+  max-height: 320px; overflow-y: auto;
+}
+.drama-acts { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.drama-act {
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--accent-bg); color: var(--accent); font-size: 11px; line-height: 1.6;
+}
+.drama-metrics { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0; }
+.drama-metric {
+  padding: 4px 10px; border-radius: var(--radius);
+  background: var(--accent-bg); color: var(--accent); font-size: 11.5px;
+}
+.drama-shots { display: flex; flex-direction: column; gap: 10px; }
+.drama-shot {
+  border: 0.5px solid var(--border-2); border-radius: var(--radius);
+  padding: 10px 12px; background: var(--bg-elev);
+}
+.drama-shot-head { margin: 0 0 6px; font-size: 12px; color: var(--fg-1); }
+.drama-shot-head b { color: var(--accent); }
+.drama-shot-grid { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 0 0 6px; }
+.drama-shot-grid span { font-size: 11px; color: var(--fg-2); }
+.drama-shot > p:not(.drama-shot-head) { margin: 3px 0; font-size: 11.5px; color: var(--fg-2); line-height: 1.6; overflow-wrap: anywhere; }
+.drama-shot > p b { color: var(--fg-1); }
+.drama-issues { list-style: none; margin: 6px 0; padding: 0; }
+.drama-issue {
+  display: flex; gap: 8px; align-items: flex-start;
+  margin-bottom: 6px; padding: 6px 8px;
+  border-left: 3px solid var(--border-2); border-radius: var(--radius);
+  background: var(--bg-elev);
+}
+.drama-sev-tag {
+  flex: 0 0 auto; padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; line-height: 18px; white-space: nowrap;
+}
+.drama-issue p { margin: 0; font-size: 11.5px; color: var(--fg-2); line-height: 1.6; overflow-wrap: anywhere; }
+.drama-issue-sug { color: var(--fg-3); }
+.drama-sev-high { border-left-color: var(--danger); }
+.drama-sev-high .drama-sev-tag { background: rgba(240, 149, 149, 0.16); color: var(--danger); }
+.drama-sev-medium { border-left-color: #d98b2b; }
+.drama-sev-medium .drama-sev-tag { background: rgba(217, 139, 43, 0.16); color: #d98b2b; }
+.drama-sev-low { border-left-color: #2f9e6f; }
+.drama-sev-low .drama-sev-tag { background: rgba(47, 158, 111, 0.16); color: #2f9e6f; }
